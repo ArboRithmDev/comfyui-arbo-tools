@@ -1,0 +1,28 @@
+[project]
+name = "comfyui-arbo-tools"
+version = "0.1.0"
+description = "Custom utility nodes for ComfyUI — optional loaders, smart merge, text utilities"
+license = {text = "AGPL-3.0-or-later"}
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "ArboRithmDev"},
+]
+keywords = ["comfyui", "nodes", "workflow", "utilities"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics",
+]
+
+[project.urls]
+Homepage = "https://github.com/ArboRithmDev/comfyui-arbo-tools"
+Repository = "https://github.com/ArboRithmDev/comfyui-arbo-tools"
+Issues = "https://github.com/ArboRithmDev/comfyui-arbo-tools/issues"
+
+[tool.comfy]
+PublisherId = "arborithmdev"
+DisplayName = "Arbo Tools"
+Description = "Utility nodes for ComfyUI — optional image loading, smart merge, text list joining"
+Icon = ""
