@@ -11,14 +11,14 @@ from .optional_load_image import EMPTY_SIGNAL_SIZE
 
 
 def _is_empty_signal(img):
-    """Check if an image is empty: None, tiny (signal), or fully black."""
+    """Check if an image is empty: None, tiny (signal), or solid single color."""
     if img is None:
         return True
     # Small signal from OptionalLoadImage (8x8 or smaller after resize)
     if img.shape[1] <= EMPTY_SIGNAL_SIZE and img.shape[2] <= EMPTY_SIGNAL_SIZE:
         return True
-    # Fully black image (all pixels zero)
-    if img.max().item() == 0.0:
+    # Solid single-color image (all pixels identical — black, white, or any flat fill)
+    if img.min().item() == img.max().item():
         return True
     return False
 
