@@ -14,5 +14,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ArboTools_OptionalMergeImages": "Merge Images (Optional)",
     "ArboTools_JoinTextList": "Join Text List",
 }
-WEB_DIRECTORY = None
+WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
