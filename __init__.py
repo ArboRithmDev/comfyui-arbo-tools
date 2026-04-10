@@ -7,11 +7,10 @@ from .nodes.optional_merge_images import OptionalMergeImages
 from .nodes.join_text_list import JoinTextList
 
 # Register server routes (spellcheck endpoint) when running inside ComfyUI
-if "comfy" in sys.modules or "server" in sys.modules:
-    try:
-        from .server import spellcheck  # noqa: F401 — registers routes on import
-    except Exception:
-        pass
+try:
+    from .server import spellcheck  # noqa: F401 — registers routes on import
+except Exception:
+    pass
 
 NODE_CLASS_MAPPINGS = {
     "ArboTools_OptionalLoadImage": OptionalLoadImage,
