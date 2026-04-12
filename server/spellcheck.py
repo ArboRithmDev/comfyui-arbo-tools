@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from aiohttp import web
 from spellchecker import SpellChecker
@@ -14,15 +13,14 @@ try:
 except Exception:
     routes = web.RouteTableDef()
 
-# Lazy-loaded spell checker (loaded on first request)
-_checker: SpellChecker | None = None
+# Lazy-loaded spell checkers per language
+_checkers: dict[str, SpellChecker] = {}
 
 
-def _get_checker() -> SpellChecker:
-    global _checker
-    if _checker is None:
-        _checker = SpellChecker(language="fr")
-    return _checker
+def _get_checker(lang: str = "fr") -> SpellChecker:
+    if lang not in _checkers:
+        _checkers[lang] = SpellChecker(language=lang)
+    return _checkers[lang]
 
 
 def _split_words(text: str) -> list[tuple[str, int]]:
@@ -42,14 +40,7 @@ async def spellcheck_endpoint(request: web.Request) -> web.Response:
     if not text:
         return web.json_response({"errors": []})
 
-    checker = _get_checker()
-
-    # Change language if needed
-    if lang != checker.language:
-        try:
-            checker = SpellChecker(language=lang)
-        except Exception:
-            pass
+    checker = _get_checker(lang)
 
     words = _split_words(text)
     word_set = {w.lower() for w, _ in words}
@@ -59,7 +50,10 @@ async def spellcheck_endpoint(request: web.Request) -> web.Response:
     for word, offset in words:
         if word.lower() in unknown:
             candidates = checker.candidates(word.lower())
-            suggestions = sorted(candidates, key=lambda c: checker.word_usage_frequency(c), reverse=True)[:5] if candidates else []
+            if candidates:
+                suggestions = sorted(candidates, key=lambda c: checker.word_usage_frequency(c), reverse=True)[:5]
+            else:
+                suggestions = []
             errors.append({
                 "word": word,
                 "offset": offset,
