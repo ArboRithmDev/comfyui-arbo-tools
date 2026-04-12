@@ -5,7 +5,7 @@
  * in a floating tooltip when hovering over misspelled words.
  */
 
-import { app } from "../../scripts/app.js";
+const { app } = window.comfyAPI?.app ?? await import("../../../scripts/app.js");
 
 const CHECK_DELAY = 800;   // ms after typing to trigger check
 const HOVER_DELAY = 400;   // ms hover before showing tooltip
