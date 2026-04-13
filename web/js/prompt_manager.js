@@ -56,6 +56,16 @@ STYLE.textContent = `
     background: #4ecdc4; color: #1e1e2e; font-weight: 600;
   }
   .arbo-popup .btn-ok:hover { background: #3dbdb5; }
+  .arbo-toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 100001;
+    background: #1e1e2e; border: 1px solid #4ecdc4; border-radius: 8px;
+    padding: 10px 18px; font-family: -apple-system, sans-serif;
+    font-size: 12px; color: #4ecdc4; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    opacity: 0; transform: translateY(10px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .arbo-toast.show { opacity: 1; transform: translateY(0); }
   .arbo-popup .field-wrap { position: relative; }
   .arbo-autocomplete {
     position: absolute; left: 0; right: 0; top: 100%;
@@ -234,6 +244,75 @@ function showPopup(title, fields, onConfirm) {
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.remove();
   });
+}
+
+// ── Toast notification ──────────────────────────────────────────────
+
+let _toastEl = null;
+let _toastTimer = null;
+
+function showToast(message) {
+  if (!_toastEl) {
+    _toastEl = document.createElement("div");
+    _toastEl.className = "arbo-toast";
+    document.body.appendChild(_toastEl);
+  }
+  _toastEl.textContent = message;
+  _toastEl.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => _toastEl.classList.remove("show"), 2000);
+}
+
+// ── Auto-save (debounced) ───────────────────────────────────────────
+
+const _saveTimers = new WeakMap();
+const SAVE_DELAY = 400;
+
+function scheduleAutoSave(node) {
+  clearTimeout(_saveTimers.get(node));
+  _saveTimers.set(node, setTimeout(() => doAutoSave(node), SAVE_DELAY));
+}
+
+async function doAutoSave(node) {
+  const autoSaveW = findWidget(node, "auto_save");
+  if (!autoSaveW?.value) return;
+
+  const promptW = findWidget(node, "prompt");
+  const catW = findWidget(node, "category");
+  const posW = findWidget(node, "positive");
+  const negW = findWidget(node, "negative");
+  const autoReplaceW = findWidget(node, "auto_replace");
+
+  const name = promptW?.value;
+  if (!name || name === "(none)") return;
+
+  const positive = posW?.value || "";
+  const negative = negW?.value || "";
+  if (!positive && !negative) return;
+
+  const category = catW?.value !== "(all)" ? catW?.value || "" : "";
+
+  try {
+    const resp = await fetch(`${API}/prompts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        category,
+        positive,
+        negative,
+        auto_replace: autoReplaceW?.value ?? true,
+      }),
+    });
+    const data = await resp.json();
+    if (data.status === "saved") {
+      showToast(`Prompt "${name}" saved`);
+    } else if (data.status === "exists") {
+      showToast(`Prompt "${name}" already exists (auto-replace off)`);
+    }
+  } catch (e) {
+    console.error("ArboTools: auto-save failed", e);
+  }
 }
 
 // ── Widget helpers ──────────────────────────────────────────────────
@@ -428,6 +507,18 @@ function setupPromptPair(node) {
         const fullPath = getPromptPath(value);
         await loadPrompt(node, fullPath);
       }
+    };
+  }
+
+  // ── Auto-save on text change (debounced) ──
+  const posW = findWidget(node, "positive");
+  const negW = findWidget(node, "negative");
+  for (const w of [posW, negW]) {
+    if (!w) continue;
+    const origCb = w.callback;
+    w.callback = function(value) {
+      if (origCb) origCb.call(this, value);
+      scheduleAutoSave(node);
     };
   }
 }

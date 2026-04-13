@@ -58,25 +58,16 @@ class PromptPair:
     def execute(self, category, prompt, auto_save, auto_replace,
                 positive, negative, neg_general=""):
 
-        # Resolve the full path: the combo shows name only, so we rebuild the path
-        full_path = None
-        if prompt and prompt != "(none)":
-            # Try direct path match first (backward compat)
+        # Resolve and load saved prompt if fields are empty
+        if prompt and prompt != "(none)" and not positive and not negative:
             saved = get_prompt_by_path(prompt)
-            if saved:
-                full_path = prompt
-            else:
-                # Name-only: find in current category
+            if not saved:
                 cat_filter = category if category != "(all)" else ""
-                candidates = list_prompts_in_category(cat_filter)
-                for c in candidates:
+                for c in list_prompts_in_category(cat_filter):
                     if c["name"] == prompt:
-                        full_path = c["path"]
-                        saved = get_prompt_by_path(full_path)
+                        saved = get_prompt_by_path(c["path"])
                         break
-
-            # Load saved data if positive/negative are empty (first load)
-            if saved and not positive and not negative:
+            if saved:
                 positive = saved.get("positive", "")
                 negative = saved.get("negative", "")
 
@@ -85,16 +76,5 @@ class PromptPair:
             final_negative = f"{negative}, {neg_general}" if negative else neg_general
         else:
             final_negative = negative
-
-        # Auto-save if enabled and we have a prompt name
-        if auto_save and prompt and prompt != "(none)" and (positive or negative):
-            cat = category if category != "(all)" else ""
-            save_prompt(
-                name=prompt,
-                category=cat,
-                positive=positive,
-                negative=negative,
-                auto_replace=auto_replace,
-            )
 
         return (positive, final_negative)
