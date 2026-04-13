@@ -91,6 +91,34 @@ def list_prompt_names() -> list[str]:
     return sorted(names)
 
 
+def list_prompts_in_category(category: str = "") -> list[dict[str, str]]:
+    """Return prompts filtered by category (and its children).
+
+    Each entry has 'name' (display name only) and 'path' (full category\\name).
+    """
+    data = _load_prompts()
+    results = []
+    cat_prefix = category.replace("/", SEP).strip(SEP) if category else ""
+
+    for p in data.get("prompts", []):
+        pcat = p.get("category", "").replace("/", SEP)
+        name = p.get("name", "")
+        if name == "_category_placeholder":
+            continue
+
+        full_path = f"{pcat}{SEP}{name}" if pcat else name
+
+        # Filter: show all if no category, or match prefix
+        if not cat_prefix or pcat == cat_prefix or pcat.startswith(cat_prefix + SEP):
+            results.append({
+                "name": name,
+                "path": full_path,
+                "category": pcat,
+            })
+
+    return sorted(results, key=lambda r: r["path"])
+
+
 def get_prompt_by_path(path: str) -> dict[str, Any] | None:
     """Find a prompt by its category\\name path."""
     data = _load_prompts()
@@ -188,6 +216,13 @@ async def api_list_prompts(_request: web.Request) -> web.Response:
 @routes.get("/arbo-tools/prompts/names")
 async def api_prompt_names(_request: web.Request) -> web.Response:
     return web.json_response(list_prompt_names())
+
+
+@routes.get("/arbo-tools/prompts/filter")
+async def api_filter_prompts(request: web.Request) -> web.Response:
+    category = request.query.get("category", "")
+    results = list_prompts_in_category(category)
+    return web.json_response(results)
 
 
 @routes.get("/arbo-tools/prompts/categories")

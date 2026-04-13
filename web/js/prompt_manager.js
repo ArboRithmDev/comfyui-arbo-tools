@@ -251,6 +251,9 @@ function updateComboOptions(widget, options) {
   }
 }
 
+// Stores the mapping: display name → full path for the current filter
+let _promptPathMap = {};
+
 async function refreshCategories(node) {
   try {
     const resp = await fetch(`${API}/prompts/categories`);
@@ -260,13 +263,32 @@ async function refreshCategories(node) {
   } catch (e) { /* silent */ }
 }
 
-async function refreshPrompts(node) {
+async function refreshPrompts(node, category = "") {
   try {
-    const resp = await fetch(`${API}/prompts/names`);
-    const names = await resp.json();
+    const cat = category === "(all)" ? "" : category;
+    const resp = await fetch(`${API}/prompts/filter?category=${encodeURIComponent(cat)}`);
+    const entries = await resp.json();
+
+    _promptPathMap = {};
+    const displayNames = ["(none)"];
+    for (const e of entries) {
+      _promptPathMap[e.name] = e.path;
+      displayNames.push(e.name);
+    }
+
     const w = findWidget(node, "prompt");
-    if (w) updateComboOptions(w, ["(none)", ...names]);
+    if (w) {
+      updateComboOptions(w, displayNames);
+      // Reset selection if current value is not in the filtered list
+      if (w.value && w.value !== "(none)" && !displayNames.includes(w.value)) {
+        w.value = "(none)";
+      }
+    }
   } catch (e) { /* silent */ }
+}
+
+function getPromptPath(displayName) {
+  return _promptPathMap[displayName] || displayName;
 }
 
 // ── Node setup ──────────────────────────────────────────────────────
@@ -349,11 +371,16 @@ function setupPromptPair(node) {
 
       invalidateCategoryCache();
       await refreshCategories(node);
-      await refreshPrompts(node);
 
-      // Select the new prompt
+      // Set category to the new prompt's category
+      const catW = findWidget(node, "category");
+      if (catW && cat) catW.value = cat;
+
+      await refreshPrompts(node, cat || "(all)");
+
+      // Select the new prompt (by name only, not full path)
       const promptW = findWidget(node, "prompt");
-      if (promptW) promptW.value = path;
+      if (promptW) promptW.value = values.name;
 
       // Clear text fields for new prompt
       const posW = findWidget(node, "positive");
@@ -365,7 +392,7 @@ function setupPromptPair(node) {
     });
   });
 
-  // ── Reorder widgets: category, +, prompt, new, auto_save, auto_replace, positive, negative ──
+  // ── Reorder widgets ──
   const order = ["category", addCatBtn.name, "prompt", newPromptBtn.name,
                   "auto_save", "auto_replace", "positive", "negative"];
   node.widgets.sort((a, b) => {
@@ -374,6 +401,19 @@ function setupPromptPair(node) {
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
 
+  // ── Filter prompts when category changes ──
+  const catW = findWidget(node, "category");
+  if (catW) {
+    const origCat = catW.callback;
+    catW.callback = async function(value) {
+      if (origCat) origCat.call(this, value);
+      await refreshPrompts(node, value);
+      node.setDirtyCanvas(true);
+    };
+    // Initial filter
+    refreshPrompts(node, catW.value);
+  }
+
   // ── Auto-load on prompt change ──
   const promptW = findWidget(node, "prompt");
   if (promptW) {
@@ -381,7 +421,8 @@ function setupPromptPair(node) {
     promptW.callback = async function(value) {
       if (orig) orig.call(this, value);
       if (value && value !== "(none)") {
-        await loadPrompt(node, value);
+        const fullPath = getPromptPath(value);
+        await loadPrompt(node, fullPath);
       }
     };
   }
