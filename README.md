@@ -2,7 +2,7 @@
 
 Custom utility nodes for ComfyUI.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blueviolet)
+![Version](https://img.shields.io/badge/version-0.2.0-blueviolet)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-green)
 
 ## Nodes
