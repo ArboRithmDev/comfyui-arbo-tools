@@ -1,25 +1,23 @@
 /**
  * Arbo Tools — Spellcheck with hover suggestions for ComfyUI.
  *
- * Checks spelling via the Python backend and shows correction suggestions
- * in a floating tooltip when hovering over misspelled words.
+ * Checks spelling via the Python backend and shows a floating panel
+ * with all corrections when hovering over a text widget.
  */
 
 const { app } = window.comfyAPI?.app ?? await import("../../../scripts/app.js");
 
-const CHECK_DELAY = 800;   // ms after typing to trigger check
-const HOVER_DELAY = 400;   // ms hover before showing tooltip
+const CHECK_DELAY = 800;
+const HOVER_DELAY = 400;
 const API_URL = "/arbo-tools/spellcheck";
 
-// Map ComfyUI locale codes to spellchecker language codes
 const LOCALE_MAP = {
   "en": "en", "en-US": "en", "en-GB": "en",
   "fr": "fr", "fr-FR": "fr",
   "de": "de", "de-DE": "de",
   "es": "es", "es-ES": "es",
   "pt": "pt", "pt-BR": "pt",
-  "it": "it",
-  "ru": "ru",
+  "it": "it", "ru": "ru",
 };
 
 async function getSpellLang() {
@@ -28,9 +26,7 @@ async function getSpellLang() {
     const settings = await resp.json();
     const locale = settings["Comfy.Locale"] || "en";
     return LOCALE_MAP[locale] || locale.split("-")[0] || "en";
-  } catch {
-    return "en";
-  }
+  } catch { return "en"; }
 }
 
 let _spellLang = null;
@@ -39,120 +35,147 @@ let _spellLang = null;
 
 const STYLE = document.createElement("style");
 STYLE.textContent = `
-  .arbo-spell-tooltip {
+  .arbo-spell-panel {
     position: fixed;
     z-index: 100000;
     background: #1e1e2e;
-    border: 1px solid #444;
-    border-radius: 6px;
-    padding: 4px 0;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 6px 0;
     font-family: -apple-system, sans-serif;
     font-size: 12px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    max-width: 220px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    max-width: 280px;
+    max-height: 200px;
+    overflow-y: auto;
     pointer-events: auto;
   }
-  .arbo-spell-tooltip .spell-header {
-    padding: 4px 10px;
-    color: #f87171;
-    font-size: 11px;
-    border-bottom: 1px solid #333;
-    margin-bottom: 2px;
+  .arbo-spell-panel .spell-title {
+    padding: 4px 10px 6px;
+    color: #888;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  .arbo-spell-tooltip .spell-suggestion {
-    padding: 4px 10px;
-    color: #e0e0e0;
+  .arbo-spell-panel .spell-error {
+    padding: 3px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid #2a2a3a;
+  }
+  .arbo-spell-panel .spell-error:last-child { border-bottom: none; }
+  .arbo-spell-panel .spell-word {
+    color: #f87171;
+    text-decoration: line-through;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .arbo-spell-panel .spell-arrow { color: #555; flex-shrink: 0; }
+  .arbo-spell-panel .spell-fixes {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .arbo-spell-panel .spell-fix {
+    color: #4ecdc4;
     cursor: pointer;
+    padding: 1px 5px;
+    border-radius: 3px;
     transition: background 0.1s;
   }
-  .arbo-spell-tooltip .spell-suggestion:hover {
+  .arbo-spell-panel .spell-fix:hover {
     background: #333;
-    color: #4ecdc4;
   }
-  .arbo-spell-underline {
-    text-decoration: wavy underline #f87171;
-    text-underline-offset: 3px;
+  .arbo-spell-panel .spell-ok {
+    padding: 8px 10px;
+    color: #4ecdc4;
+    text-align: center;
+    font-size: 11px;
   }
 `;
 
 // ── State ───────────────────────────────────────────────────────────
 
-let tooltip = null;
+let panel = null;
 let hoverTimer = null;
 let checkTimer = null;
-const fieldErrors = new WeakMap(); // textarea → [{word, offset, length, suggestions}]
+let activeTextarea = null;
+const fieldErrors = new WeakMap();
 
-// ── Tooltip ─────────────────────────────────────────────────────────
+// ── Panel ───────────────────────────────────────────────────────────
 
-function createTooltip() {
-  if (tooltip) return tooltip;
-  tooltip = document.createElement("div");
-  tooltip.className = "arbo-spell-tooltip";
-  tooltip.style.display = "none";
-  document.body.appendChild(tooltip);
-  tooltip.addEventListener("mouseleave", hideTooltip);
-  return tooltip;
+function createPanel() {
+  if (panel) return panel;
+  panel = document.createElement("div");
+  panel.className = "arbo-spell-panel";
+  panel.style.display = "none";
+  document.body.appendChild(panel);
+  panel.addEventListener("mouseleave", () => {
+    setTimeout(() => {
+      if (panel && !panel.matches(":hover")) hidePanel();
+    }, 300);
+  });
+  return panel;
 }
 
-function showTooltip(x, y, word, suggestions, textarea) {
-  const tt = createTooltip();
-  let html = `<div class="spell-header">"${word}" — suggestions</div>`;
-  if (suggestions.length === 0) {
-    html += `<div class="spell-suggestion" style="color:#666;cursor:default;">Aucune suggestion</div>`;
+function showPanel(textarea) {
+  const errors = fieldErrors.get(textarea) || [];
+  const p = createPanel();
+
+  if (errors.length === 0) {
+    p.innerHTML = `<div class="spell-ok">No spelling errors</div>`;
   } else {
-    for (const s of suggestions) {
-      html += `<div class="spell-suggestion" data-replacement="${s}">${s}</div>`;
+    let html = `<div class="spell-title">${errors.length} correction${errors.length > 1 ? "s" : ""}</div>`;
+    for (const err of errors) {
+      html += `<div class="spell-error">`;
+      html += `<span class="spell-word">${err.word}</span>`;
+      html += `<span class="spell-arrow">→</span>`;
+      html += `<span class="spell-fixes">`;
+      if (err.suggestions.length === 0) {
+        html += `<span style="color:#666;">?</span>`;
+      } else {
+        for (const s of err.suggestions.slice(0, 3)) {
+          html += `<span class="spell-fix" data-old="${err.word}" data-new="${s}">${s}</span>`;
+        }
+      }
+      html += `</span></div>`;
     }
+    p.innerHTML = html;
   }
-  tt.innerHTML = html;
 
-  // Position near cursor but within viewport
-  const rect = document.body.getBoundingClientRect();
-  tt.style.left = Math.min(x, window.innerWidth - 240) + "px";
-  tt.style.top = Math.min(y + 20, window.innerHeight - 200) + "px";
-  tt.style.display = "block";
+  // Position near the textarea
+  const rect = textarea.getBoundingClientRect();
+  p.style.left = Math.min(rect.left, window.innerWidth - 290) + "px";
+  p.style.top = Math.min(rect.bottom + 4, window.innerHeight - 210) + "px";
+  p.style.display = "block";
+  activeTextarea = textarea;
 
-  // Click handlers for suggestions
-  tt.querySelectorAll(".spell-suggestion[data-replacement]").forEach(el => {
+  // Bind fix clicks
+  p.querySelectorAll(".spell-fix").forEach(el => {
     el.onclick = () => {
-      replaceWord(textarea, word, el.dataset.replacement);
-      hideTooltip();
+      replaceWord(textarea, el.dataset.old, el.dataset.new);
+      // Refresh panel after fix
+      setTimeout(() => showPanel(textarea), 100);
     };
   });
 }
 
-function hideTooltip() {
-  if (tooltip) tooltip.style.display = "none";
-  clearTimeout(hoverTimer);
+function hidePanel() {
+  if (panel) panel.style.display = "none";
+  activeTextarea = null;
 }
 
 // ── Word replacement ────────────────────────────────────────────────
 
 function replaceWord(textarea, oldWord, newWord) {
   const text = textarea.value;
-  const cursor = textarea.selectionStart;
-
-  // Find the occurrence of the word closest to cursor position
   const regex = new RegExp(`\\b${escapeRegex(oldWord)}\\b`, "gi");
-  let match;
-  let bestMatch = null;
-  let bestDist = Infinity;
-
-  while ((match = regex.exec(text)) !== null) {
-    const dist = Math.abs(match.index - cursor);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestMatch = match;
-    }
-  }
-
-  if (bestMatch) {
-    // Preserve original case pattern
-    const replacement = matchCase(bestMatch[0], newWord);
-    textarea.value = text.slice(0, bestMatch.index) + replacement + text.slice(bestMatch.index + bestMatch[0].length);
-    // Trigger input event so ComfyUI picks up the change
+  const match = regex.exec(text);
+  if (match) {
+    const replacement = matchCase(match[0], newWord);
+    textarea.value = text.slice(0, match.index) + replacement + text.slice(match.index + match[0].length);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    // Re-check after replacement
     scheduleCheck(textarea);
   }
 }
@@ -176,7 +199,6 @@ async function checkSpelling(textarea) {
     return;
   }
 
-  // Detect language from ComfyUI settings (cached after first call)
   if (!_spellLang) _spellLang = await getSpellLang();
 
   try {
@@ -187,8 +209,13 @@ async function checkSpelling(textarea) {
     });
     const data = await resp.json();
     fieldErrors.set(textarea, data.errors || []);
+
+    // If panel is open for this textarea, refresh it
+    if (activeTextarea === textarea && panel?.style.display === "block") {
+      showPanel(textarea);
+    }
   } catch (e) {
-    // Silently fail — don't break the UI
+    // Silently fail
   }
 }
 
@@ -197,114 +224,41 @@ function scheduleCheck(textarea) {
   checkTimer = setTimeout(() => checkSpelling(textarea), CHECK_DELAY);
 }
 
-// ── Hover detection ─────────────────────────────────────────────────
-
-function getWordAtCursor(textarea, clientX, clientY) {
-  // Get the character position from mouse coordinates
-  // We create a mirror div to measure text positions
-  const text = textarea.value;
-  const errors = fieldErrors.get(textarea) || [];
-  if (errors.length === 0) return null;
-
-  // Use the textarea's selection API to find the cursor position
-  // This is a simplified approach: we check which error word the cursor is near
-  const caretPos = getCaretPositionFromPoint(textarea, clientX, clientY);
-  if (caretPos < 0) return null;
-
-  for (const err of errors) {
-    if (caretPos >= err.offset && caretPos <= err.offset + err.length) {
-      return err;
-    }
-  }
-  return null;
-}
-
-function getCaretPositionFromPoint(textarea, clientX, clientY) {
-  // Use document.caretPositionFromPoint or caretRangeFromPoint
-  if (document.caretPositionFromPoint) {
-    const pos = document.caretPositionFromPoint(clientX, clientY);
-    if (pos && pos.offsetNode === textarea || pos?.offsetNode?.parentNode === textarea) {
-      return pos.offset;
-    }
-  }
-
-  // Fallback: estimate position from textarea metrics
-  const rect = textarea.getBoundingClientRect();
-  const style = getComputedStyle(textarea);
-  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-  const charWidth = parseFloat(style.fontSize) * 0.6; // approximate
-  const paddingLeft = parseFloat(style.paddingLeft) || 0;
-  const paddingTop = parseFloat(style.paddingTop) || 0;
-
-  const relX = clientX - rect.left - paddingLeft;
-  const relY = clientY - rect.top - paddingTop + textarea.scrollTop;
-
-  const row = Math.floor(relY / lineHeight);
-  const col = Math.floor(relX / charWidth);
-
-  // Find position in text accounting for line wraps
-  const lines = textarea.value.split("\n");
-  let pos = 0;
-  for (let i = 0; i < Math.min(row, lines.length); i++) {
-    pos += lines[i].length + 1;
-  }
-  pos += Math.max(0, col);
-
-  return Math.min(pos, textarea.value.length);
-}
-
 // ── Event binding ───────────────────────────────────────────────────
 
 function bindTextarea(textarea) {
   if (textarea.dataset.arboSpellBound) return;
   textarea.dataset.arboSpellBound = "1";
 
-  // Check on input (debounced)
   textarea.addEventListener("input", () => scheduleCheck(textarea));
-
-  // Check on focus
   textarea.addEventListener("focus", () => scheduleCheck(textarea));
 
-  // Show tooltip on hover
-  textarea.addEventListener("mousemove", (e) => {
+  textarea.addEventListener("mouseenter", () => {
     clearTimeout(hoverTimer);
-    const errors = fieldErrors.get(textarea) || [];
-    if (errors.length === 0) return;
-
     hoverTimer = setTimeout(() => {
-      const err = getWordAtCursor(textarea, e.clientX, e.clientY);
-      if (err) {
-        showTooltip(e.clientX, e.clientY, err.word, err.suggestions, textarea);
-      } else {
-        hideTooltip();
-      }
+      const errors = fieldErrors.get(textarea) || [];
+      if (errors.length > 0) showPanel(textarea);
     }, HOVER_DELAY);
   });
 
   textarea.addEventListener("mouseleave", () => {
     clearTimeout(hoverTimer);
-    // Small delay before hiding to allow moving to tooltip
     setTimeout(() => {
-      if (tooltip && !tooltip.matches(":hover")) hideTooltip();
-    }, 200);
+      if (panel && !panel.matches(":hover")) hidePanel();
+    }, 300);
   });
 
-  // Initial check
   if (textarea.value) scheduleCheck(textarea);
 }
 
-// ── Extension registration ──────────────────────────────────────────
+// ── Extension ───────────────────────────────────────────────────────
 
 app.registerExtension({
   name: "ArboTools.Spellcheck",
-
   setup() {
     document.head.appendChild(STYLE);
-
-    // Bind existing textareas
     document.querySelectorAll("textarea").forEach(bindTextarea);
 
-    // Watch for new textareas (ComfyUI creates them dynamically for node widgets)
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
@@ -314,7 +268,6 @@ app.registerExtension({
         }
       }
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
   },
 });
