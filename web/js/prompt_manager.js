@@ -56,7 +56,119 @@ STYLE.textContent = `
     background: #4ecdc4; color: #1e1e2e; font-weight: 600;
   }
   .arbo-popup .btn-ok:hover { background: #3dbdb5; }
+  .arbo-popup .field-wrap { position: relative; }
+  .arbo-autocomplete {
+    position: absolute; left: 0; right: 0; top: 100%;
+    background: #2a2a3a; border: 1px solid #555; border-top: none;
+    border-radius: 0 0 6px 6px; max-height: 150px; overflow-y: auto;
+    z-index: 10;
+  }
+  .arbo-autocomplete .ac-item {
+    padding: 6px 10px; font-size: 12px; color: #ccc; cursor: pointer;
+  }
+  .arbo-autocomplete .ac-item:hover,
+  .arbo-autocomplete .ac-item.active {
+    background: #333; color: #4ecdc4;
+  }
+  .arbo-autocomplete .ac-item .ac-match {
+    color: #4ecdc4; font-weight: 600;
+  }
+  .arbo-autocomplete .ac-new {
+    padding: 6px 10px; font-size: 11px; color: #888;
+    border-top: 1px solid #333; font-style: italic;
+  }
 `;
+
+// ── Autocomplete cache ──────────────────────────────────────────────
+
+let _cachedCategories = null;
+
+async function getCachedCategories() {
+  if (!_cachedCategories) {
+    try {
+      const resp = await fetch(`${API}/prompts/categories`);
+      _cachedCategories = await resp.json();
+    } catch { _cachedCategories = []; }
+  }
+  return _cachedCategories;
+}
+
+function invalidateCategoryCache() { _cachedCategories = null; }
+
+// ── Autocomplete widget ─────────────────────────────────────────────
+
+function attachAutocomplete(input, getSuggestions) {
+  let dropdown = null;
+  let activeIdx = -1;
+
+  function close() {
+    if (dropdown) { dropdown.remove(); dropdown = null; }
+    activeIdx = -1;
+  }
+
+  function highlight(text, query) {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return text.slice(0, idx) + `<span class="ac-match">${text.slice(idx, idx + query.length)}</span>` + text.slice(idx + query.length);
+  }
+
+  async function update() {
+    const query = input.value.trim();
+    const suggestions = await getSuggestions(query);
+
+    close();
+    if (suggestions.length === 0 && !query) return;
+
+    dropdown = document.createElement("div");
+    dropdown.className = "arbo-autocomplete";
+
+    for (let i = 0; i < suggestions.length; i++) {
+      const item = document.createElement("div");
+      item.className = "ac-item";
+      item.innerHTML = highlight(suggestions[i], query);
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        input.value = suggestions[i];
+        close();
+        input.dispatchEvent(new Event("input"));
+      });
+      dropdown.appendChild(item);
+    }
+
+    // "Create new" hint if query doesn't match any existing
+    if (query && !suggestions.some(s => s.toLowerCase() === query.toLowerCase())) {
+      const newItem = document.createElement("div");
+      newItem.className = "ac-new";
+      newItem.textContent = `↵ Create "${query}"`;
+      dropdown.appendChild(newItem);
+    }
+
+    input.parentElement.appendChild(dropdown);
+  }
+
+  input.addEventListener("input", update);
+  input.addEventListener("focus", update);
+  input.addEventListener("blur", () => setTimeout(close, 200));
+
+  input.addEventListener("keydown", (e) => {
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll(".ac-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      items.forEach((it, i) => it.classList.toggle("active", i === activeIdx));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      items.forEach((it, i) => it.classList.toggle("active", i === activeIdx));
+    } else if (e.key === "Tab" && activeIdx >= 0) {
+      e.preventDefault();
+      input.value = items[activeIdx].textContent;
+      close();
+    }
+  });
+}
 
 // ── Popup helpers ───────────────────────────────────────────────────
 
@@ -68,7 +180,9 @@ function showPopup(title, fields, onConfirm) {
   for (const f of fields) {
     fieldsHtml += `
       <label>${f.label}</label>
-      <input type="text" id="arbo-popup-${f.id}" value="${f.value || ""}" placeholder="${f.placeholder || ""}">
+      <div class="field-wrap">
+        <input type="text" id="arbo-popup-${f.id}" value="${f.value || ""}" placeholder="${f.placeholder || ""}">
+      </div>
       ${f.hint ? `<div class="hint">${f.hint}</div>` : ""}
     `;
   }
@@ -86,14 +200,24 @@ function showPopup(title, fields, onConfirm) {
 
   document.body.appendChild(overlay);
 
+  // Attach autocomplete to category fields
+  for (const f of fields) {
+    if (f.autocomplete) {
+      const inp = overlay.querySelector(`#arbo-popup-${f.id}`);
+      if (inp) attachAutocomplete(inp, f.autocomplete);
+    }
+  }
+
   // Focus first input
   const firstInput = overlay.querySelector("input");
   if (firstInput) setTimeout(() => firstInput.focus(), 50);
 
-  // Enter key = OK
+  // Enter key = OK (only if no autocomplete dropdown is open)
   overlay.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") overlay.querySelector(".btn-ok").click();
+      if (e.key === "Enter" && !overlay.querySelector(".arbo-autocomplete")) {
+        overlay.querySelector(".btn-ok").click();
+      }
       if (e.key === "Escape") overlay.remove();
     });
   });
@@ -155,7 +279,13 @@ function setupPromptPair(node) {
         id: "cat",
         label: "Category path",
         placeholder: "e.g. Personnages\\Fantasy\\Elfes",
-        hint: "Use \\ to create sub-categories",
+        hint: "Use \\ to create sub-categories. Start typing to see existing categories.",
+        autocomplete: async (query) => {
+          const cats = await getCachedCategories();
+          if (!query) return cats;
+          const q = query.toLowerCase();
+          return cats.filter(c => c.toLowerCase().includes(q));
+        },
       },
     ], async (values) => {
       if (!values.cat) return;
@@ -169,6 +299,7 @@ function setupPromptPair(node) {
           positive: "", negative: "",
         }),
       });
+      invalidateCategoryCache();
       await refreshCategories(node);
       const catW = findWidget(node, "category");
       if (catW) catW.value = values.cat;
@@ -192,7 +323,13 @@ function setupPromptPair(node) {
         label: "Category",
         value: currentCat,
         placeholder: "e.g. Personnages\\Fantasy",
-        hint: "Leave empty for root level",
+        hint: "Leave empty for root level. Start typing to see existing categories.",
+        autocomplete: async (query) => {
+          const cats = await getCachedCategories();
+          if (!query) return cats;
+          const q = query.toLowerCase();
+          return cats.filter(c => c.toLowerCase().includes(q));
+        },
       },
     ], async (values) => {
       if (!values.name) return;
@@ -210,6 +347,7 @@ function setupPromptPair(node) {
         }),
       });
 
+      invalidateCategoryCache();
       await refreshCategories(node);
       await refreshPrompts(node);
 
