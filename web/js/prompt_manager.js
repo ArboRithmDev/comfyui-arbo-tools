@@ -408,10 +408,14 @@ function setupPromptPair(node) {
     catW.callback = async function(value) {
       if (origCat) origCat.call(this, value);
       await refreshPrompts(node, value);
+      // Reset prompt selection
+      const promptW = findWidget(node, "prompt");
+      if (promptW) promptW.value = "(none)";
       node.setDirtyCanvas(true);
+      app.graph.setDirtyCanvas(true, true);
     };
-    // Initial filter
-    refreshPrompts(node, catW.value);
+    // Initial filter on node load
+    setTimeout(() => refreshPrompts(node, catW.value), 100);
   }
 
   // ── Auto-load on prompt change ──

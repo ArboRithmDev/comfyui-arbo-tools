@@ -16,6 +16,7 @@ from arbo_server.prompt_storage import (
     get_neglib_text,
     save_prompt,
     list_categories,
+    list_prompts_in_category,
 )
 
 
@@ -57,20 +58,39 @@ class PromptPair:
     def execute(self, category, prompt, auto_save, auto_replace,
                 positive, negative, neg_general=""):
 
+        # Resolve the full path: the combo shows name only, so we rebuild the path
+        full_path = None
+        if prompt and prompt != "(none)":
+            # Try direct path match first (backward compat)
+            saved = get_prompt_by_path(prompt)
+            if saved:
+                full_path = prompt
+            else:
+                # Name-only: find in current category
+                cat_filter = category if category != "(all)" else ""
+                candidates = list_prompts_in_category(cat_filter)
+                for c in candidates:
+                    if c["name"] == prompt:
+                        full_path = c["path"]
+                        saved = get_prompt_by_path(full_path)
+                        break
+
+            # Load saved data if positive/negative are empty (first load)
+            if saved and not positive and not negative:
+                positive = saved.get("positive", "")
+                negative = saved.get("negative", "")
+
         # Build final negative: specific + optional general
         if neg_general:
             final_negative = f"{negative}, {neg_general}" if negative else neg_general
         else:
             final_negative = negative
 
-        # Auto-save if enabled
-        if auto_save and prompt and prompt != "(none)":
-            # Extract name from path
-            parts = prompt.replace("/", "\\").split("\\")
-            name = parts[-1]
-            cat = "\\".join(parts[:-1]) if len(parts) > 1 else ""
+        # Auto-save if enabled and we have a prompt name
+        if auto_save and prompt and prompt != "(none)" and (positive or negative):
+            cat = category if category != "(all)" else ""
             save_prompt(
-                name=name,
+                name=prompt,
                 category=cat,
                 positive=positive,
                 negative=negative,
