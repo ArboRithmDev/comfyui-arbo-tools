@@ -466,7 +466,7 @@ app.registerExtension({
         btn.style.cssText = "background:none;border:none;color:#aaa;cursor:pointer;font-size:13px;padding:4px 8px;";
         menuBar.appendChild(btn);
       } else {
-        btn.style.cssText = "position:fixed;top:8px;right:200px;z-index:9999;background:#252536;border:1px solid #444;border-radius:6px;color:#aaa;padding:6px 12px;cursor:pointer;font-size:12px;font-family:-apple-system,sans-serif;";
+        btn.style.cssText = "position:fixed;top:8px;right:8px;z-index:9999;background:#252536;border:1px solid #444;border-radius:6px;color:#aaa;padding:6px 12px;cursor:pointer;font-size:12px;font-family:-apple-system,sans-serif;";
         document.body.appendChild(btn);
       }
     };
