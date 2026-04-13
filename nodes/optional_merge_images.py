@@ -47,7 +47,7 @@ class OptionalMergeImages:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-    CATEGORY = "image"
+    CATEGORY = "ArboTools/Image"
 
     def execute(self, method, image_1=None, image_2=None, image_3=None, image_4=None, image_5=None):
         # Filter out None and empty signal images

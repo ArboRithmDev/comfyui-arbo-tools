@@ -52,7 +52,7 @@ class PromptPair:
     RETURN_NAMES = ("POSITIVE", "NEGATIVE")
     OUTPUT_TOOLTIPS = ("The positive prompt text", "The negative prompt (specific + library)")
     FUNCTION = "execute"
-    CATEGORY = "text"
+    CATEGORY = "ArboTools/Prompt"
 
     @classmethod
     def IS_CHANGED(s, preset, positive, negative, neg_library, save_as, category, save):
@@ -132,7 +132,7 @@ class NegativeLibrary:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("NEGATIVE",)
     FUNCTION = "execute"
-    CATEGORY = "text"
+    CATEGORY = "ArboTools/Prompt"
 
     def execute(self, preset, append_to=""):
         text = get_neglib_text(preset)

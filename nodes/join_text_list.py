@@ -20,7 +20,7 @@ class JoinTextList:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "execute"
-    CATEGORY = "text"
+    CATEGORY = "ArboTools/Text"
     INPUT_IS_LIST = True
 
     def execute(self, text, separator, deduplicate):

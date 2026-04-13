@@ -43,7 +43,7 @@ class OptionalLoadImage:
             },
         }
 
-    CATEGORY = "image"
+    CATEGORY = "ArboTools/Image"
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "load_image"
 
