@@ -1,10 +1,21 @@
-"""Prompt storage — persistent JSON-based prompt library with categories."""
+"""Prompt storage — filesystem-based prompt library.
+
+Categories = directories, prompts = individual JSON files.
+Structure:
+    ComfyUI/user/default/prompts/
+    ├── Personnages/
+    │   ├── _meta.json              (optional, for future use)
+    │   ├── Fantasy/
+    │   │   └── ShowOff Frontal.json
+    │   └── EveryDayLife/
+    │       └── PlayingBall.json
+    └── _negative_library.json
+"""
 
 from __future__ import annotations
 
 import json
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -16,59 +27,239 @@ try:
 except Exception:
     routes = web.RouteTableDef()
 
-# Store prompts in ComfyUI/user/default/prompts/ alongside workflows
 _COMFYUI_ROOT = Path(__file__).parent.parent.parent.parent
-_DATA_DIR = _COMFYUI_ROOT / "user" / "default" / "prompts"
-_PROMPTS_FILE = _DATA_DIR / "prompts.json"
-_NEGLIB_FILE = _DATA_DIR / "negative_library.json"
-_CATEGORIES_FILE = _DATA_DIR / "categories.json"
-
-# Legacy location — migrate if present
-_LEGACY_DIR = Path(__file__).parent.parent / "data"
+_PROMPTS_DIR = _COMFYUI_ROOT / "user" / "default" / "prompts"
+_NEGLIB_FILE = _PROMPTS_DIR / "_negative_library.json"
 
 SEP = "\\"  # Category separator in display paths
 
+# Legacy locations for migration
+_LEGACY_DIR = Path(__file__).parent.parent / "data"
+_LEGACY_PROMPTS_JSON = _COMFYUI_ROOT / "user" / "default" / "prompts" / "prompts.json"
 
-# ── Data access ──────────────────────────────────────────────────────
+
+# ── Init & migration ────────────────────────────────────────────────
 
 
-def _ensure_data_dir():
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _migrate_legacy_data()
+def _ensure_dir():
+    _PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 _migrated = False
 
-def _migrate_legacy_data():
-    """Move data from old location (custom_nodes/arbo-tools/data/) to new (user/default/prompts/)."""
+
+def _migrate():
+    """Migrate from old formats (single JSON) to filesystem."""
     global _migrated
     if _migrated:
         return
     _migrated = True
+    _ensure_dir()
 
-    for filename in ("prompts.json", "negative_library.json", "categories.json"):
-        old = _LEGACY_DIR / filename
-        new = _DATA_DIR / filename
-        if old.exists() and not new.exists():
-            new.write_text(old.read_text(encoding="utf-8"), encoding="utf-8")
-            old.unlink()
-            print(f"[ArboTools] Migrated {filename} → {new}")
+    # Migrate from legacy data/ dir or single prompts.json
+    for source in (_LEGACY_DIR / "prompts.json", _LEGACY_PROMPTS_JSON):
+        if not source.exists():
+            continue
+        try:
+            data = json.loads(source.read_text(encoding="utf-8"))
+            for p in data.get("prompts", []):
+                name = p.get("name", "")
+                if not name or name == "_category_placeholder":
+                    continue
+                cat = p.get("category", "").replace("/", SEP)
+                save_prompt(
+                    name=name, category=cat,
+                    positive=p.get("positive", ""),
+                    negative=p.get("negative", ""),
+                )
+            source.unlink()
+            print(f"[ArboTools] Migrated prompts from {source}")
+        except Exception as e:
+            print(f"[ArboTools] Migration error: {e}")
+
+    # Migrate neglib
+    for source in (_LEGACY_DIR / "negative_library.json",):
+        if source.exists() and not _NEGLIB_FILE.exists():
+            _NEGLIB_FILE.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            source.unlink()
+
+    # Migrate categories.json → create directories
+    for source in (_LEGACY_DIR / "categories.json", _PROMPTS_DIR / "categories.json"):
+        if source.exists():
+            try:
+                cats = json.loads(source.read_text(encoding="utf-8"))
+                for cat in cats:
+                    cat_dir = _PROMPTS_DIR / Path(cat.replace(SEP, "/"))
+                    cat_dir.mkdir(parents=True, exist_ok=True)
+                source.unlink()
+            except Exception:
+                pass
 
 
-def _load_prompts() -> dict[str, Any]:
-    _ensure_data_dir()
-    if _PROMPTS_FILE.exists():
-        return json.loads(_PROMPTS_FILE.read_text(encoding="utf-8"))
-    return {"prompts": []}
+# ── Prompt file I/O ──────────────────────────────────────────────────
 
 
-def _save_prompts(data: dict[str, Any]):
-    _ensure_data_dir()
-    _PROMPTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+def _prompt_path(name: str, category: str) -> Path:
+    """Get the filesystem path for a prompt."""
+    cat = category.replace(SEP, "/").strip("/")
+    if cat:
+        return _PROMPTS_DIR / cat / f"{name}.json"
+    return _PROMPTS_DIR / f"{name}.json"
+
+
+def _read_prompt(path: Path) -> dict[str, Any] | None:
+    """Read a prompt JSON file."""
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # Inject name and category from path
+        data["name"] = path.stem
+        rel = path.relative_to(_PROMPTS_DIR)
+        if rel.parent != Path("."):
+            data["category"] = str(rel.parent).replace("/", SEP)
+        else:
+            data["category"] = ""
+        return data
+    except Exception:
+        return None
+
+
+def _write_prompt(path: Path, data: dict[str, Any]):
+    """Write a prompt JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Don't store name/category in the file — they come from the path
+    to_save = {
+        "positive": data.get("positive", ""),
+        "negative": data.get("negative", ""),
+        "tags": data.get("tags", []),
+        "created_at": data.get("created_at", time.strftime("%Y-%m-%dT%H:%M:%S")),
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    path.write_text(json.dumps(to_save, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _scan_prompts() -> list[dict[str, Any]]:
+    """Scan the filesystem for all prompt files."""
+    _migrate()
+    _ensure_dir()
+    results = []
+    for path in sorted(_PROMPTS_DIR.rglob("*.json")):
+        if path.name.startswith("_"):
+            continue
+        prompt = _read_prompt(path)
+        if prompt:
+            results.append(prompt)
+    return results
+
+
+# ── Public helpers (used by nodes) ───────────────────────────────────
+
+
+def list_categories() -> list[str]:
+    """Return sorted list of all category paths (from directory structure)."""
+    _migrate()
+    _ensure_dir()
+    cats = set()
+    for d in _PROMPTS_DIR.rglob("*"):
+        if d.is_dir() and not d.name.startswith("_"):
+            rel = str(d.relative_to(_PROMPTS_DIR)).replace("/", SEP)
+            # Add all parent levels
+            parts = rel.split(SEP)
+            for i in range(1, len(parts) + 1):
+                cats.add(SEP.join(parts[:i]))
+    return sorted(cats)
+
+
+def add_category(path: str) -> str:
+    """Create a category directory (and all parents). Returns normalized path."""
+    _ensure_dir()
+    normalized = path.replace("/", SEP).strip(SEP).strip()
+    if not normalized:
+        return ""
+    cat_dir = _PROMPTS_DIR / normalized.replace(SEP, "/")
+    cat_dir.mkdir(parents=True, exist_ok=True)
+    return normalized
+
+
+def list_prompt_names() -> list[str]:
+    """Return flat list of 'category\\name' paths for combo widgets."""
+    return [
+        f"{p['category']}{SEP}{p['name']}" if p["category"] else p["name"]
+        for p in _scan_prompts()
+    ]
+
+
+def list_prompts_in_category(category: str = "") -> list[dict[str, str]]:
+    """Return prompts filtered by category (and children).
+
+    Each entry has 'display', 'name', 'path', 'category'.
+    """
+    all_prompts = _scan_prompts()
+    cat_prefix = category.replace("/", SEP).strip(SEP) if category else ""
+
+    raw = []
+    for p in all_prompts:
+        pcat = p["category"]
+        name = p["name"]
+        full_path = f"{pcat}{SEP}{name}" if pcat else name
+
+        if not cat_prefix or pcat == cat_prefix or pcat.startswith(cat_prefix + SEP):
+            raw.append({"name": name, "path": full_path, "category": pcat})
+
+    # Detect duplicate names → prefix with parent
+    name_count: dict[str, int] = {}
+    for r in raw:
+        name_count[r["name"]] = name_count.get(r["name"], 0) + 1
+
+    results = []
+    for r in raw:
+        if name_count[r["name"]] > 1 and r["category"]:
+            parent = r["category"].split(SEP)[-1]
+            display = f"{parent}{SEP}{r['name']}"
+        else:
+            display = r["name"]
+        results.append({**r, "display": display})
+
+    return sorted(results, key=lambda r: r["path"])
+
+
+def get_prompt_by_path(path: str) -> dict[str, Any] | None:
+    """Find a prompt by its category\\name path."""
+    parts = path.replace("/", SEP).split(SEP)
+    name = parts[-1]
+    category = SEP.join(parts[:-1]) if len(parts) > 1 else ""
+    return _read_prompt(_prompt_path(name, category))
+
+
+def save_prompt(
+    name: str,
+    category: str,
+    positive: str,
+    negative: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """Save a prompt file."""
+    cat = category.replace("/", SEP).strip(SEP).strip()
+    path = _prompt_path(name.strip(), cat)
+
+    # Preserve created_at if updating
+    existing = _read_prompt(path)
+    data = {
+        "positive": positive,
+        "negative": negative,
+        "tags": kwargs.get("tags", []),
+        "created_at": existing.get("created_at") if existing else time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    _write_prompt(path, data)
+    return {"status": "saved", "name": name, "category": cat}
+
+
+# ── Negative library ─────────────────────────────────────────────────
 
 
 def _load_neglib() -> list[dict[str, Any]]:
-    _ensure_data_dir()
+    _ensure_dir()
     if _NEGLIB_FILE.exists():
         return json.loads(_NEGLIB_FILE.read_text(encoding="utf-8"))
     defaults = [
@@ -82,163 +273,8 @@ def _load_neglib() -> list[dict[str, Any]]:
 
 
 def _save_neglib(data: list[dict[str, Any]]):
-    _ensure_data_dir()
+    _ensure_dir()
     _NEGLIB_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-# ── Public helpers (used by nodes) ───────────────────────────────────
-
-
-def _load_categories() -> list[str]:
-    _ensure_data_dir()
-    if _CATEGORIES_FILE.exists():
-        return json.loads(_CATEGORIES_FILE.read_text(encoding="utf-8"))
-    return []
-
-
-def _save_categories(cats: list[str]):
-    _ensure_data_dir()
-    _CATEGORIES_FILE.write_text(json.dumps(sorted(set(cats)), ensure_ascii=False), encoding="utf-8")
-
-
-def list_categories() -> list[str]:
-    """Return sorted list of all category paths (from prompts + explicit)."""
-    cats = set(_load_categories())
-    data = _load_prompts()
-    for p in data.get("prompts", []):
-        cat = p.get("category", "")
-        if cat:
-            parts = cat.replace("/", SEP).split(SEP)
-            for i in range(1, len(parts) + 1):
-                cats.add(SEP.join(parts[:i]))
-    return sorted(cats)
-
-
-def add_category(path: str) -> str:
-    """Add a category path (and all parent levels). Returns the normalized path."""
-    normalized = path.replace("/", SEP).strip(SEP).strip()
-    if not normalized:
-        return ""
-    cats = _load_categories()
-    parts = normalized.split(SEP)
-    for i in range(1, len(parts) + 1):
-        cats.append(SEP.join(parts[:i]))
-    _save_categories(cats)
-    return normalized
-
-
-def list_prompt_names() -> list[str]:
-    """Return flat list of 'category\\name' paths for combo widgets."""
-    data = _load_prompts()
-    names = []
-    for p in data.get("prompts", []):
-        cat = p.get("category", "").replace("/", SEP)
-        name = p.get("name", "")
-        if cat:
-            names.append(f"{cat}{SEP}{name}")
-        else:
-            names.append(name)
-    return sorted(names)
-
-
-def list_prompts_in_category(category: str = "") -> list[dict[str, str]]:
-    """Return prompts filtered by category (and its children).
-
-    Each entry has 'display' (name with parent prefix if ambiguous),
-    'name' (raw name), 'path' (full category\\name), 'category'.
-    Placeholder entries are excluded.
-    """
-    data = _load_prompts()
-    raw = []
-    cat_prefix = category.replace("/", SEP).strip(SEP) if category else ""
-
-    for p in data.get("prompts", []):
-        pcat = p.get("category", "").replace("/", SEP)
-        name = p.get("name", "")
-        if name == "_category_placeholder":
-            continue
-
-        full_path = f"{pcat}{SEP}{name}" if pcat else name
-
-        # Filter: show all if no category, or match prefix
-        if not cat_prefix or pcat == cat_prefix or pcat.startswith(cat_prefix + SEP):
-            raw.append({
-                "name": name,
-                "path": full_path,
-                "category": pcat,
-                "id": p.get("id", ""),
-            })
-
-    # Detect duplicate names and prefix with parent category
-    name_count: dict[str, int] = {}
-    for r in raw:
-        name_count[r["name"]] = name_count.get(r["name"], 0) + 1
-
-    results = []
-    for r in raw:
-        if name_count[r["name"]] > 1 and r["category"]:
-            # Use last category segment as prefix
-            parent = r["category"].split(SEP)[-1]
-            display = f"{parent}{SEP}{r['name']}"
-        else:
-            display = r["name"]
-        results.append({**r, "display": display})
-
-    return sorted(results, key=lambda r: r["path"])
-
-
-def get_prompt_by_path(path: str) -> dict[str, Any] | None:
-    """Find a prompt by its category\\name path."""
-    data = _load_prompts()
-    for p in data.get("prompts", []):
-        cat = p.get("category", "").replace("/", SEP)
-        name = p.get("name", "")
-        full = f"{cat}{SEP}{name}" if cat else name
-        if full == path:
-            return p
-    return None
-
-
-def save_prompt(
-    name: str,
-    category: str,
-    positive: str,
-    negative: str,
-    prompt_id: str | None = None,
-    auto_replace: bool = True,
-) -> dict[str, Any]:
-    """Save or update a prompt pair."""
-    data = _load_prompts()
-    cat = category.replace("/", SEP).strip(SEP).strip()
-
-    entry = {
-        "id": prompt_id or str(uuid.uuid4())[:8],
-        "name": name.strip(),
-        "category": cat,
-        "positive": positive,
-        "negative": negative,
-        "tags": [],
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-
-    existing_idx = None
-    for i, p in enumerate(data["prompts"]):
-        if p.get("name") == name.strip() and p.get("category", "").replace("/", SEP) == cat:
-            existing_idx = i
-            break
-
-    if existing_idx is not None:
-        if not auto_replace:
-            return {"status": "exists", "prompt": data["prompts"][existing_idx]}
-        entry["id"] = data["prompts"][existing_idx]["id"]
-        entry["created_at"] = data["prompts"][existing_idx].get("created_at", entry["created_at"])
-        data["prompts"][existing_idx] = entry
-    else:
-        data["prompts"].append(entry)
-
-    _save_prompts(data)
-    return {"status": "saved", "prompt": entry}
 
 
 def list_neglib_names() -> list[str]:
@@ -253,6 +289,7 @@ def get_neglib_text(name: str) -> str:
 
 
 def save_neglib_entry(name: str, text: str, entry_id: str | None = None) -> dict[str, Any]:
+    import uuid
     lib = _load_neglib()
     eid = entry_id or str(uuid.uuid4())[:8]
 
@@ -278,7 +315,7 @@ def save_neglib_entry(name: str, text: str, entry_id: str | None = None) -> dict
 
 @routes.get("/arbo-tools/prompts")
 async def api_list_prompts(_request: web.Request) -> web.Response:
-    return web.json_response(_load_prompts())
+    return web.json_response({"prompts": _scan_prompts()})
 
 
 @routes.get("/arbo-tools/prompts/names")
@@ -289,8 +326,7 @@ async def api_prompt_names(_request: web.Request) -> web.Response:
 @routes.get("/arbo-tools/prompts/filter")
 async def api_filter_prompts(request: web.Request) -> web.Response:
     category = request.query.get("category", "")
-    results = list_prompts_in_category(category)
-    return web.json_response(results)
+    return web.json_response(list_prompts_in_category(category))
 
 
 @routes.get("/arbo-tools/prompts/categories")
@@ -328,18 +364,19 @@ async def api_save_prompt(request: web.Request) -> web.Response:
         category=body.get("category", ""),
         positive=body.get("positive", ""),
         negative=body.get("negative", ""),
-        prompt_id=body.get("id"),
-        auto_replace=body.get("auto_replace", True),
     )
     return web.json_response(result)
 
 
-@routes.delete("/arbo-tools/prompts/{prompt_id}")
+@routes.delete("/arbo-tools/prompts/{prompt_path:.*}")
 async def api_delete_prompt(request: web.Request) -> web.Response:
-    prompt_id = request.match_info["prompt_id"]
-    data = _load_prompts()
-    data["prompts"] = [p for p in data["prompts"] if p.get("id") != prompt_id]
-    _save_prompts(data)
+    prompt_path = request.match_info["prompt_path"]
+    prompt = get_prompt_by_path(prompt_path)
+    if not prompt:
+        return web.json_response({"error": "not found"}, status=404)
+    path = _prompt_path(prompt["name"], prompt["category"])
+    if path.exists():
+        path.unlink()
     return web.json_response({"status": "deleted"})
 
 
