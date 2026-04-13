@@ -280,8 +280,6 @@ async function doAutoSave(node) {
   const promptW = findWidget(node, "prompt");
   const posW = findWidget(node, "positive");
   const negW = findWidget(node, "negative");
-  const autoReplaceW = findWidget(node, "auto_replace");
-
   const displayName = promptW?.value;
   if (!displayName || displayName === "(none)") return;
 
@@ -289,14 +287,13 @@ async function doAutoSave(node) {
   const negative = negW?.value || "";
   if (!positive && !negative) return;
 
-  // Resolve the prompt info (name, category, id) from the display name
   const info = getPromptInfo(displayName);
   const name = info?.name || displayName;
   const category = info?.category || "";
   const promptId = info?.id || null;
 
   try {
-    const body = { name, category, positive, negative, auto_replace: autoReplaceW?.value ?? true };
+    const body = { name, category, positive, negative, auto_replace: true };
     if (promptId) body.id = promptId;
 
     const resp = await fetch(`${API}/prompts`, {
@@ -467,7 +464,7 @@ function setupPromptPair(node) {
 
   // ── Reorder widgets ──
   const order = ["category", addCatBtn.name, "prompt", newPromptBtn.name,
-                  "auto_save", "auto_replace", "positive", "negative"];
+                  "auto_save", "positive", "negative"];
   node.widgets.sort((a, b) => {
     const ai = order.indexOf(a.name);
     const bi = order.indexOf(b.name);

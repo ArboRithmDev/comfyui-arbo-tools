@@ -37,7 +37,6 @@ class PromptPair:
                 "category": (categories,),
                 "prompt": (prompts,),
                 "auto_save": ("BOOLEAN", {"default": False}),
-                "auto_replace": ("BOOLEAN", {"default": True}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),
             },
@@ -55,7 +54,7 @@ class PromptPair:
     def IS_CHANGED(s, **kwargs):
         return float("nan")
 
-    def execute(self, category, prompt, auto_save, auto_replace,
+    def execute(self, category, prompt, auto_save,
                 positive, negative, neg_general=""):
 
         # Resolve and load saved prompt if fields are empty
