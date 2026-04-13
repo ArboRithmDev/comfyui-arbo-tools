@@ -1,8 +1,7 @@
 /**
  * Arbo Tools — Prompt Manager frontend extension.
  *
- * Handles dynamic loading of saved prompts when the user changes
- * the preset combo, and auto-populates positive/negative fields.
+ * Auto-loads saved prompts when the user changes the load_preset combo.
  */
 
 const { app } = window.comfyAPI?.app ?? await import("../../../scripts/app.js");
@@ -29,13 +28,13 @@ function findWidget(node, name) {
 // ── Prompt Pair ─────────────────────────────────────────────────────
 
 function setupPromptPair(node) {
-  const promptNameW = findWidget(node, "prompt_name");
-  if (!promptNameW) return;
+  const loadW = findWidget(node, "load_preset");
+  if (!loadW) return;
 
-  const originalCallback = promptNameW.callback;
-  promptNameW.callback = async function(value) {
+  const originalCallback = loadW.callback;
+  loadW.callback = async function(value) {
     if (originalCallback) originalCallback.call(this, value);
-    if (value && value !== "(new)") {
+    if (value && value !== "(none)") {
       await loadPromptIntoNode(node, value);
     }
   };
@@ -49,17 +48,13 @@ async function loadPromptIntoNode(node, path) {
 
     const positiveW = findWidget(node, "positive");
     const negativeW = findWidget(node, "negative");
-    const categoryW = findWidget(node, "category");
+    const saveCatW = findWidget(node, "save_category");
+    const saveNameW = findWidget(node, "save_name");
 
-    if (positiveW && data.positive != null) {
-      positiveW.value = data.positive;
-    }
-    if (negativeW && data.negative != null) {
-      negativeW.value = data.negative;
-    }
-    if (categoryW && data.category) {
-      categoryW.value = data.category;
-    }
+    if (positiveW && data.positive != null) positiveW.value = data.positive;
+    if (negativeW && data.negative != null) negativeW.value = data.negative;
+    if (saveCatW && data.category != null) saveCatW.value = data.category;
+    if (saveNameW && data.name != null) saveNameW.value = data.name;
 
     node.setDirtyCanvas(true);
   } catch (e) {
@@ -70,11 +65,11 @@ async function loadPromptIntoNode(node, path) {
 // ── Negative Library ────────────────────────────────────────────────
 
 function setupNegativeLibrary(node) {
-  const presetW = findWidget(node, "preset");
-  if (!presetW) return;
+  const loadW = findWidget(node, "load_preset");
+  if (!loadW) return;
 
-  const originalCallback = presetW.callback;
-  presetW.callback = async function(value) {
+  const originalCallback = loadW.callback;
+  loadW.callback = async function(value) {
     if (originalCallback) originalCallback.call(this, value);
     if (value && value !== "(new)") {
       await loadNeglibIntoNode(node, value);
@@ -91,7 +86,7 @@ async function loadNeglibIntoNode(node, name) {
     const titleW = findWidget(node, "title");
     const contentW = findWidget(node, "content");
 
-    if (titleW) titleW.value = data.name || name;
+    if (titleW && data.name != null) titleW.value = data.name;
     if (contentW && data.text != null) contentW.value = data.text;
 
     node.setDirtyCanvas(true);
