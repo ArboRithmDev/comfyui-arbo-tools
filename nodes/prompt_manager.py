@@ -51,6 +51,11 @@ class PromptPair:
     CATEGORY = "ArboTools/Prompt"
 
     @classmethod
+    def VALIDATE_INPUTS(s, **kwargs):
+        # Accept any value — the JS frontend dynamically filters the combo
+        return True
+
+    @classmethod
     def IS_CHANGED(s, **kwargs):
         return float("nan")
 
