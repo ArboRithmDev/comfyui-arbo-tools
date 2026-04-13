@@ -9,8 +9,8 @@ from .nodes.prompt_manager import PromptPair, NegativeLibrary
 
 # Register server routes (spellcheck endpoint) when running inside ComfyUI
 try:
-    from .server import spellcheck  # noqa: F401 — registers routes on import
-    from .server import prompt_storage  # noqa: F401 — registers prompt API routes
+    from .arbo_server import spellcheck  # noqa: F401 — registers routes on import
+    from .arbo_server import prompt_storage  # noqa: F401 — registers prompt API routes
 except Exception:
     pass
 

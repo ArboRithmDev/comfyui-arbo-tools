@@ -6,12 +6,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Ensure server module is importable
+# Ensure arbo_server module is importable
 _root = Path(__file__).parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from server.prompt_storage import (
+from arbo_server.prompt_storage import (
     list_prompt_names,
     get_prompt_by_path,
     list_neglib_names,
