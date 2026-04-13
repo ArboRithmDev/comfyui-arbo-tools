@@ -16,10 +16,15 @@ try:
 except Exception:
     routes = web.RouteTableDef()
 
-_DATA_DIR = Path(__file__).parent.parent / "data"
+# Store prompts in ComfyUI/user/default/prompts/ alongside workflows
+_COMFYUI_ROOT = Path(__file__).parent.parent.parent.parent
+_DATA_DIR = _COMFYUI_ROOT / "user" / "default" / "prompts"
 _PROMPTS_FILE = _DATA_DIR / "prompts.json"
 _NEGLIB_FILE = _DATA_DIR / "negative_library.json"
 _CATEGORIES_FILE = _DATA_DIR / "categories.json"
+
+# Legacy location — migrate if present
+_LEGACY_DIR = Path(__file__).parent.parent / "data"
 
 SEP = "\\"  # Category separator in display paths
 
@@ -29,6 +34,25 @@ SEP = "\\"  # Category separator in display paths
 
 def _ensure_data_dir():
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_data()
+
+
+_migrated = False
+
+def _migrate_legacy_data():
+    """Move data from old location (custom_nodes/arbo-tools/data/) to new (user/default/prompts/)."""
+    global _migrated
+    if _migrated:
+        return
+    _migrated = True
+
+    for filename in ("prompts.json", "negative_library.json", "categories.json"):
+        old = _LEGACY_DIR / filename
+        new = _DATA_DIR / filename
+        if old.exists() and not new.exists():
+            new.write_text(old.read_text(encoding="utf-8"), encoding="utf-8")
+            old.unlink()
+            print(f"[ArboTools] Migrated {filename} → {new}")
 
 
 def _load_prompts() -> dict[str, Any]:
