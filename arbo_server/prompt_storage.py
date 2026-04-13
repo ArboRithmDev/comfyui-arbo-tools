@@ -277,6 +277,110 @@ def _save_neglib(data: list[dict[str, Any]]):
     _NEGLIB_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def build_tree() -> list[dict[str, Any]]:
+    """Build a hierarchical tree structure for the treeview."""
+    _migrate()
+    _ensure_dir()
+    return _scan_tree(_PROMPTS_DIR)
+
+
+def _scan_tree(directory: Path) -> list[dict[str, Any]]:
+    """Recursively scan a directory into a tree structure."""
+    nodes = []
+    if not directory.exists():
+        return nodes
+
+    for item in sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
+        if item.name.startswith("_") or item.name.startswith("."):
+            continue
+        rel = str(item.relative_to(_PROMPTS_DIR))
+
+        if item.is_dir():
+            children = _scan_tree(item)
+            nodes.append({
+                "name": item.name,
+                "path": rel.replace("/", SEP),
+                "type": "folder",
+                "children": children,
+            })
+        elif item.suffix == ".json":
+            nodes.append({
+                "name": item.stem,
+                "path": rel.replace("/", SEP).removesuffix(".json"),
+                "type": "prompt",
+            })
+    return nodes
+
+
+def rename_prompt_file(old_path: str, new_name: str) -> dict[str, Any]:
+    """Rename a prompt file."""
+    parts = old_path.replace("/", SEP).split(SEP)
+    old_name = parts[-1]
+    category = SEP.join(parts[:-1]) if len(parts) > 1 else ""
+    old_file = _prompt_path(old_name, category)
+    new_file = old_file.parent / f"{new_name}.json"
+    if not old_file.exists():
+        return {"error": "Prompt not found"}
+    if new_file.exists():
+        return {"error": f"Prompt '{new_name}' already exists"}
+    old_file.rename(new_file)
+    return {"status": "renamed"}
+
+
+def move_prompt_file(src_path: str, dest_category: str) -> dict[str, Any]:
+    """Move a prompt to a different category."""
+    parts = src_path.replace("/", SEP).split(SEP)
+    name = parts[-1]
+    old_cat = SEP.join(parts[:-1]) if len(parts) > 1 else ""
+    src_file = _prompt_path(name, old_cat)
+    if not src_file.exists():
+        return {"error": "Prompt not found"}
+    dest_file = _prompt_path(name, dest_category)
+    dest_file.parent.mkdir(parents=True, exist_ok=True)
+    if dest_file.exists():
+        return {"error": f"Prompt '{name}' already exists in destination"}
+    src_file.rename(dest_file)
+    return {"status": "moved"}
+
+
+def rename_category_dir(old_path: str, new_name: str) -> dict[str, Any]:
+    """Rename a category directory."""
+    old_dir = _PROMPTS_DIR / old_path.replace(SEP, "/")
+    if not old_dir.exists() or not old_dir.is_dir():
+        return {"error": "Category not found"}
+    new_dir = old_dir.parent / new_name
+    if new_dir.exists():
+        return {"error": f"Category '{new_name}' already exists"}
+    old_dir.rename(new_dir)
+    return {"status": "renamed"}
+
+
+def delete_category_dir(path: str) -> dict[str, Any]:
+    """Delete a category directory and all its contents."""
+    import shutil
+    target = _PROMPTS_DIR / path.replace(SEP, "/")
+    if not target.exists() or not target.is_dir():
+        return {"error": "Category not found"}
+    if target == _PROMPTS_DIR:
+        return {"error": "Cannot delete root"}
+    shutil.rmtree(target)
+    return {"status": "deleted"}
+
+
+def move_category_dir(src_path: str, dest_path: str) -> dict[str, Any]:
+    """Move a category into another category."""
+    src_dir = _PROMPTS_DIR / src_path.replace(SEP, "/")
+    if not src_dir.exists():
+        return {"error": "Source not found"}
+    dest_parent = _PROMPTS_DIR / dest_path.replace(SEP, "/") if dest_path else _PROMPTS_DIR
+    dest_parent.mkdir(parents=True, exist_ok=True)
+    dest_dir = dest_parent / src_dir.name
+    if dest_dir.exists():
+        return {"error": f"'{src_dir.name}' already exists in destination"}
+    src_dir.rename(dest_dir)
+    return {"status": "moved"}
+
+
 def list_neglib_names() -> list[str]:
     return [e.get("name", "") for e in _load_neglib()]
 
@@ -411,3 +515,51 @@ async def api_delete_neglib(request: web.Request) -> web.Response:
     lib = [e for e in lib if e.get("id") != entry_id]
     _save_neglib(lib)
     return web.json_response({"status": "deleted"})
+
+
+# ── Tree & operations ────────────────────────────────────────────────
+
+
+@routes.get("/arbo-tools/prompts/tree")
+async def api_tree(_request: web.Request) -> web.Response:
+    return web.json_response({"tree": build_tree()})
+
+
+@routes.post("/arbo-tools/prompts/rename")
+async def api_rename_prompt(request: web.Request) -> web.Response:
+    body = await request.json()
+    result = rename_prompt_file(body.get("old_path", ""), body.get("new_name", ""))
+    status = 200 if "error" not in result else 400
+    return web.json_response(result, status=status)
+
+
+@routes.post("/arbo-tools/prompts/move")
+async def api_move_prompt(request: web.Request) -> web.Response:
+    body = await request.json()
+    result = move_prompt_file(body.get("src_path", ""), body.get("dest_category", ""))
+    status = 200 if "error" not in result else 400
+    return web.json_response(result, status=status)
+
+
+@routes.post("/arbo-tools/prompts/categories/rename")
+async def api_rename_category(request: web.Request) -> web.Response:
+    body = await request.json()
+    result = rename_category_dir(body.get("old_path", ""), body.get("new_name", ""))
+    status = 200 if "error" not in result else 400
+    return web.json_response(result, status=status)
+
+
+@routes.delete("/arbo-tools/prompts/categories/{cat_path:.*}")
+async def api_delete_category(request: web.Request) -> web.Response:
+    path = request.match_info["cat_path"]
+    result = delete_category_dir(path)
+    status = 200 if "error" not in result else 400
+    return web.json_response(result, status=status)
+
+
+@routes.post("/arbo-tools/prompts/categories/move")
+async def api_move_category(request: web.Request) -> web.Response:
+    body = await request.json()
+    result = move_category_dir(body.get("src_path", ""), body.get("dest_path", ""))
+    status = 200 if "error" not in result else 400
+    return web.json_response(result, status=status)
