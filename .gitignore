@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 data/prompts.json
 data/negative_library.json
+data/categories.json

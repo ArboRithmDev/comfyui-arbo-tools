@@ -278,31 +278,31 @@ async function doAutoSave(node) {
   if (!autoSaveW?.value) return;
 
   const promptW = findWidget(node, "prompt");
-  const catW = findWidget(node, "category");
   const posW = findWidget(node, "positive");
   const negW = findWidget(node, "negative");
   const autoReplaceW = findWidget(node, "auto_replace");
 
-  const name = promptW?.value;
-  if (!name || name === "(none)") return;
+  const displayName = promptW?.value;
+  if (!displayName || displayName === "(none)") return;
 
   const positive = posW?.value || "";
   const negative = negW?.value || "";
   if (!positive && !negative) return;
 
-  const category = catW?.value !== "(all)" ? catW?.value || "" : "";
+  // Resolve the prompt info (name, category, id) from the display name
+  const info = getPromptInfo(displayName);
+  const name = info?.name || displayName;
+  const category = info?.category || "";
+  const promptId = info?.id || null;
 
   try {
+    const body = { name, category, positive, negative, auto_replace: autoReplaceW?.value ?? true };
+    if (promptId) body.id = promptId;
+
     const resp = await fetch(`${API}/prompts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        category,
-        positive,
-        negative,
-        auto_replace: autoReplaceW?.value ?? true,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json();
     if (data.status === "saved") {
@@ -330,7 +330,7 @@ function updateComboOptions(widget, options) {
   }
 }
 
-// Stores the mapping: display name → full path for the current filter
+// Maps: display name → {path, name, category, id} for the current filter
 let _promptPathMap = {};
 
 async function refreshCategories(node) {
@@ -351,14 +351,13 @@ async function refreshPrompts(node, category = "") {
     _promptPathMap = {};
     const displayNames = ["(none)"];
     for (const e of entries) {
-      _promptPathMap[e.name] = e.path;
-      displayNames.push(e.name);
+      _promptPathMap[e.display] = e;
+      displayNames.push(e.display);
     }
 
     const w = findWidget(node, "prompt");
     if (w) {
       updateComboOptions(w, displayNames);
-      // Reset selection if current value is not in the filtered list
       if (w.value && w.value !== "(none)" && !displayNames.includes(w.value)) {
         w.value = "(none)";
       }
@@ -366,8 +365,8 @@ async function refreshPrompts(node, category = "") {
   } catch (e) { /* silent */ }
 }
 
-function getPromptPath(displayName) {
-  return _promptPathMap[displayName] || displayName;
+function getPromptInfo(displayName) {
+  return _promptPathMap[displayName] || null;
 }
 
 // ── Node setup ──────────────────────────────────────────────────────
@@ -390,15 +389,10 @@ function setupPromptPair(node) {
       },
     ], async (values) => {
       if (!values.cat) return;
-      // Save an empty prompt in this category to register it
-      await fetch(`${API}/prompts`, {
+      await fetch(`${API}/prompts/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "_category_placeholder",
-          category: values.cat,
-          positive: "", negative: "",
-        }),
+        body: JSON.stringify({ path: values.cat }),
       });
       invalidateCategoryCache();
       await refreshCategories(node);
@@ -504,8 +498,10 @@ function setupPromptPair(node) {
     promptW.callback = async function(value) {
       if (orig) orig.call(this, value);
       if (value && value !== "(none)") {
-        const fullPath = getPromptPath(value);
-        await loadPrompt(node, fullPath);
+        const info = getPromptInfo(value);
+        if (info) {
+          await loadPrompt(node, info.path);
+        }
       }
     };
   }

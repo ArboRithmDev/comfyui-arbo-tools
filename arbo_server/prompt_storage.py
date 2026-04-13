@@ -19,6 +19,7 @@ except Exception:
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _PROMPTS_FILE = _DATA_DIR / "prompts.json"
 _NEGLIB_FILE = _DATA_DIR / "negative_library.json"
+_CATEGORIES_FILE = _DATA_DIR / "categories.json"
 
 SEP = "\\"  # Category separator in display paths
 
@@ -64,10 +65,22 @@ def _save_neglib(data: list[dict[str, Any]]):
 # ── Public helpers (used by nodes) ───────────────────────────────────
 
 
+def _load_categories() -> list[str]:
+    _ensure_data_dir()
+    if _CATEGORIES_FILE.exists():
+        return json.loads(_CATEGORIES_FILE.read_text(encoding="utf-8"))
+    return []
+
+
+def _save_categories(cats: list[str]):
+    _ensure_data_dir()
+    _CATEGORIES_FILE.write_text(json.dumps(sorted(set(cats)), ensure_ascii=False), encoding="utf-8")
+
+
 def list_categories() -> list[str]:
-    """Return sorted list of all category paths."""
+    """Return sorted list of all category paths (from prompts + explicit)."""
+    cats = set(_load_categories())
     data = _load_prompts()
-    cats = set()
     for p in data.get("prompts", []):
         cat = p.get("category", "")
         if cat:
@@ -75,6 +88,19 @@ def list_categories() -> list[str]:
             for i in range(1, len(parts) + 1):
                 cats.add(SEP.join(parts[:i]))
     return sorted(cats)
+
+
+def add_category(path: str) -> str:
+    """Add a category path (and all parent levels). Returns the normalized path."""
+    normalized = path.replace("/", SEP).strip(SEP).strip()
+    if not normalized:
+        return ""
+    cats = _load_categories()
+    parts = normalized.split(SEP)
+    for i in range(1, len(parts) + 1):
+        cats.append(SEP.join(parts[:i]))
+    _save_categories(cats)
+    return normalized
 
 
 def list_prompt_names() -> list[str]:
@@ -94,10 +120,12 @@ def list_prompt_names() -> list[str]:
 def list_prompts_in_category(category: str = "") -> list[dict[str, str]]:
     """Return prompts filtered by category (and its children).
 
-    Each entry has 'name' (display name only) and 'path' (full category\\name).
+    Each entry has 'display' (name with parent prefix if ambiguous),
+    'name' (raw name), 'path' (full category\\name), 'category'.
+    Placeholder entries are excluded.
     """
     data = _load_prompts()
-    results = []
+    raw = []
     cat_prefix = category.replace("/", SEP).strip(SEP) if category else ""
 
     for p in data.get("prompts", []):
@@ -110,11 +138,27 @@ def list_prompts_in_category(category: str = "") -> list[dict[str, str]]:
 
         # Filter: show all if no category, or match prefix
         if not cat_prefix or pcat == cat_prefix or pcat.startswith(cat_prefix + SEP):
-            results.append({
+            raw.append({
                 "name": name,
                 "path": full_path,
                 "category": pcat,
+                "id": p.get("id", ""),
             })
+
+    # Detect duplicate names and prefix with parent category
+    name_count: dict[str, int] = {}
+    for r in raw:
+        name_count[r["name"]] = name_count.get(r["name"], 0) + 1
+
+    results = []
+    for r in raw:
+        if name_count[r["name"]] > 1 and r["category"]:
+            # Use last category segment as prefix
+            parent = r["category"].split(SEP)[-1]
+            display = f"{parent}{SEP}{r['name']}"
+        else:
+            display = r["name"]
+        results.append({**r, "display": display})
 
     return sorted(results, key=lambda r: r["path"])
 
@@ -228,6 +272,16 @@ async def api_filter_prompts(request: web.Request) -> web.Response:
 @routes.get("/arbo-tools/prompts/categories")
 async def api_categories(_request: web.Request) -> web.Response:
     return web.json_response(list_categories())
+
+
+@routes.post("/arbo-tools/prompts/categories")
+async def api_add_category(request: web.Request) -> web.Response:
+    body = await request.json()
+    path = body.get("path", "").strip()
+    if not path:
+        return web.json_response({"error": "path is required"}, status=400)
+    normalized = add_category(path)
+    return web.json_response({"status": "created", "path": normalized})
 
 
 @routes.get("/arbo-tools/prompts/load")
