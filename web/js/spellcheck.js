@@ -11,6 +11,30 @@ const CHECK_DELAY = 800;   // ms after typing to trigger check
 const HOVER_DELAY = 400;   // ms hover before showing tooltip
 const API_URL = "/arbo-tools/spellcheck";
 
+// Map ComfyUI locale codes to spellchecker language codes
+const LOCALE_MAP = {
+  "en": "en", "en-US": "en", "en-GB": "en",
+  "fr": "fr", "fr-FR": "fr",
+  "de": "de", "de-DE": "de",
+  "es": "es", "es-ES": "es",
+  "pt": "pt", "pt-BR": "pt",
+  "it": "it",
+  "ru": "ru",
+};
+
+async function getSpellLang() {
+  try {
+    const resp = await fetch("/settings");
+    const settings = await resp.json();
+    const locale = settings["Comfy.Locale"] || "en";
+    return LOCALE_MAP[locale] || locale.split("-")[0] || "en";
+  } catch {
+    return "en";
+  }
+}
+
+let _spellLang = null;
+
 // ── Styles ──────────────────────────────────────────────────────────
 
 const STYLE = document.createElement("style");
@@ -152,11 +176,14 @@ async function checkSpelling(textarea) {
     return;
   }
 
+  // Detect language from ComfyUI settings (cached after first call)
+  if (!_spellLang) _spellLang = await getSpellLang();
+
   try {
     const resp = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, lang: "fr" }),
+      body: JSON.stringify({ text, lang: _spellLang }),
     });
     const data = await resp.json();
     fieldErrors.set(textarea, data.errors || []);
