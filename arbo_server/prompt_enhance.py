@@ -18,10 +18,12 @@ _DATA_DIR = Path(__file__).parent.parent.parent.parent / "user" / "default" / "p
 _CONFIG_FILE = _DATA_DIR / "_studio_config.json"
 
 ENHANCE_SYSTEM = {
-    "light": "Slightly improve this prompt: fix grammar, clarify meaning, keep it very close to the original. ",
-    "medium": "Enhance this prompt: add relevant details about composition, lighting, colors, textures, mood. Enrich without changing the core intent or structure. ",
-    "heavy": "Creatively rewrite this prompt: reimagine with vivid details, artistic direction, dramatic composition. Keep the same subject and scene but make it visually striking. ",
+    "light": "Slightly improve this prompt: fix grammar, clarify meaning, add 1-2 missing quality tags. Keep it very close to the original.\n",
+    "medium": "Significantly enhance this prompt: ADD at least 5-10 new details about composition, lighting, colors, textures, mood, camera settings, atmosphere. You MUST add content that was not in the original. Keep the same scene but make it richer.\n",
+    "heavy": "Dramatically rewrite and expand this prompt: reimagine with vivid new details, dramatic lighting, cinematic composition, rich textures, atmospheric effects. You MUST substantially change and expand the text. Double the descriptive content. Keep the same subject but transform the prompt.\n",
 }
+
+ENHANCE_TEMPERATURE = {"light": 0.3, "medium": 0.7, "heavy": 0.9}
 
 # Prompt style → system prompt mapping
 FAMILY_STYLE = {
@@ -84,7 +86,7 @@ def _save_config(data: dict[str, Any]):
     _CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-async def _call_local_gguf(prompt: str, system: str, config: dict) -> str:
+async def _call_local_gguf(prompt: str, system: str, config: dict, temperature: float = 0.7) -> str:
     """Call a local GGUF model via llama-cpp-python."""
     import asyncio
     model_id = config.get("model", "")
@@ -105,7 +107,7 @@ async def _call_local_gguf(prompt: str, system: str, config: dict) -> str:
                 {"role": "user", "content": prompt},
             ],
             max_tokens=1500,
-            temperature=0.7,
+            temperature=temperature,
         )
         return result["choices"][0]["message"]["content"].strip()
 
@@ -114,7 +116,7 @@ async def _call_local_gguf(prompt: str, system: str, config: dict) -> str:
     return await loop.run_in_executor(None, _run)
 
 
-async def _call_ollama(prompt: str, system: str, config: dict) -> str:
+async def _call_ollama(prompt: str, system: str, config: dict, temperature: float = 0.7) -> str:
     """Call Ollama API."""
     import aiohttp
     url = config.get("ollama_url", "http://localhost:11434")
@@ -128,12 +130,13 @@ async def _call_ollama(prompt: str, system: str, config: dict) -> str:
             "prompt": prompt,
             "system": system,
             "stream": False,
+            "options": {"temperature": temperature},
         }, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             data = await resp.json()
             return data.get("response", "").strip()
 
 
-async def _call_openai(prompt: str, system: str, config: dict) -> str:
+async def _call_openai(prompt: str, system: str, config: dict, temperature: float = 0.7) -> str:
     """Call OpenAI-compatible API."""
     import aiohttp
     api_key = config.get("api_key", "")
@@ -145,14 +148,14 @@ async def _call_openai(prompt: str, system: str, config: dict) -> str:
             json={"model": model, "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
-            ], "max_tokens": 2000},
+            ], "max_tokens": 2000, "temperature": temperature},
             timeout=aiohttp.ClientTimeout(total=60),
         ) as resp:
             data = await resp.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
 
-async def _call_anthropic(prompt: str, system: str, config: dict) -> str:
+async def _call_anthropic(prompt: str, system: str, config: dict, temperature: float = 0.7) -> str:
     """Call Anthropic API."""
     import aiohttp
     api_key = config.get("api_key", "")
@@ -161,7 +164,7 @@ async def _call_anthropic(prompt: str, system: str, config: dict) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.post("https://api.anthropic.com/v1/messages",
             headers={"x-api-key": api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01"},
-            json={"model": model, "max_tokens": 2000, "system": system,
+            json={"model": model, "max_tokens": 2000, "temperature": temperature, "system": system,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=aiohttp.ClientTimeout(total=60),
         ) as resp:
@@ -200,16 +203,17 @@ async def enhance_prompt(positive: str, negative: str, level: str, config: dict)
 
     # Only ask to enhance the positive prompt — negative is kept as-is
     user_prompt = f"{positive}"
+    temperature = ENHANCE_TEMPERATURE.get(level, 0.7)
 
     try:
         if provider == "ollama":
-            response = await _call_ollama(user_prompt, system, config)
+            response = await _call_ollama(user_prompt, system, config, temperature)
         elif provider == "local_gguf":
-            response = await _call_local_gguf(user_prompt, system, config)
+            response = await _call_local_gguf(user_prompt, system, config, temperature)
         elif provider == "openai":
-            response = await _call_openai(user_prompt, system, config)
+            response = await _call_openai(user_prompt, system, config, temperature)
         elif provider == "anthropic":
-            response = await _call_anthropic(user_prompt, system, config)
+            response = await _call_anthropic(user_prompt, system, config, temperature)
         else:
             return {"error": f"Unknown provider: {provider}"}
 
