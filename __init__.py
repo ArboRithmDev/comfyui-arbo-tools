@@ -11,6 +11,7 @@ from .nodes.prompt_manager import PromptPair
 try:
     from .arbo_server import spellcheck  # noqa: F401 — registers routes on import
     from .arbo_server import prompt_storage  # noqa: F401 — registers prompt API routes
+    from .arbo_server import prompt_enhance  # noqa: F401 — registers studio/enhance routes
 except Exception:
     pass
 
