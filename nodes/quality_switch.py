@@ -16,7 +16,7 @@ class QualitySwitch:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "mode": (["Draft", "HQ"],),
+                "hq_mode": ("BOOLEAN", {"default": False, "label_on": "HQ", "label_off": "Draft"}),
                 "draft_steps": ("INT", {"default": 8, "min": 1, "max": 100}),
                 "hq_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "draft_upscale_steps": ("INT", {"default": 5, "min": 1, "max": 100}),
@@ -42,13 +42,12 @@ class QualitySwitch:
     _last_draft_seed = None
 
     @classmethod
-    def IS_CHANGED(s, mode, **kwargs):
-        # In Draft mode, always re-execute to get a new seed
-        if mode == "Draft":
+    def IS_CHANGED(s, hq_mode, **kwargs):
+        if not hq_mode:
             return float("nan")
-        return mode
+        return "HQ"
 
-    def execute(self, mode,
+    def execute(self, hq_mode,
                 draft_steps, hq_steps,
                 draft_upscale_steps, hq_upscale_steps,
                 draft_width, hq_width,
@@ -56,7 +55,9 @@ class QualitySwitch:
                 draft_megapixels, hq_megapixels,
                 label=""):
 
-        if mode == "Draft":
+        mode = "HQ" if hq_mode else "Draft"
+
+        if not hq_mode:
             seed = random.randint(0, 2**63 - 1)
             QualitySwitch._last_draft_seed = seed
             steps = draft_steps
@@ -72,9 +73,6 @@ class QualitySwitch:
             height = hq_height
             megapixels = hq_megapixels
 
-        # Build filename tag: mode_{label_} or just mode_
-        tag = f"{mode}_"
-        if label:
-            tag = f"{mode}_{label}_"
+        tag = f"{mode}_{label}_" if label else f"{mode}_"
 
         return (steps, upscale_steps, width, height, megapixels, seed, tag, mode)
