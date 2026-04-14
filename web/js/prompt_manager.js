@@ -277,6 +277,10 @@ async function doAutoSave(node) {
   const autoSaveW = findWidget(node, "auto_save");
   if (!autoSaveW?.value) return;
 
+  // Don't auto-save from widget if Prompt Studio is open on the same prompt
+  // The studio is the source of truth when open
+  if (window._psStudioOpenPath) return;
+
   const promptW = findWidget(node, "prompt");
   const posW = findWidget(node, "positive");
   const negW = findWidget(node, "negative");

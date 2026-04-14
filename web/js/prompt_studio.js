@@ -290,7 +290,10 @@ class PromptStudio {
     this.activeTab = "editor";
   }
 
-  toggle() { if (this.panel) { this.panel.remove(); this.panel = null; } else this.open(); }
+  toggle() {
+    if (this.panel) { this.panel.remove(); this.panel = null; window._psStudioOpenPath = null; }
+    else this.open();
+  }
 
   async open() {
     await loadConfig();
@@ -616,8 +619,9 @@ class PromptStudio {
   // ── Editor ──────────────────────────────────────────────────────
 
   async loadPrompt(path) {
-    if (!path) { this._showEmpty(); return; }
+    if (!path) { this._showEmpty(); window._psStudioOpenPath = null; return; }
     this.selectedPath = path;
+    window._psStudioOpenPath = path;
     const data = await psApi.loadPrompt(path);
     if (data.error) { this._showEmpty(); return; }
 
@@ -691,6 +695,7 @@ class PromptStudio {
 
   _showEmpty() {
     this.selectedPath = null;
+    window._psStudioOpenPath = null;
     const ed = this.panel?.querySelector(".ps-editor");
     if (ed) ed.innerHTML = `<div class="ps-editor-empty">Select a prompt to edit</div>`;
   }

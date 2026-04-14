@@ -62,8 +62,8 @@ class PromptPair:
     def execute(self, category, prompt, auto_save,
                 positive, negative, neg_general=""):
 
-        # Resolve and load saved prompt if fields are empty
-        if prompt and prompt != "(none)" and not positive and not negative:
+        # Always read the latest version from disk (studio may have updated it)
+        if prompt and prompt != "(none)":
             saved = get_prompt_by_path(prompt)
             if not saved:
                 cat_filter = category if category != "(all)" else ""
