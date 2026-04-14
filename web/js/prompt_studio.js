@@ -582,6 +582,7 @@ class PromptStudio {
   ]); }
 
   _promptMenu(e, n) { psContextMenu(e, [
+    { label: "Duplicate", action: () => this._duplicatePrompt(n) },
     { label: "Rename", action: () => this._renamePrompt(n) },
     { label: "Move to...", action: () => this._movePromptTo(n) },
     { separator: true },
@@ -592,6 +593,19 @@ class PromptStudio {
 
   async _newFolder(p) { const n = await psPrompt("New Folder", "", "Folder name..."); if (!n) return; await psApi.addCategory(p ? `${p}\\${n}` : n); if (p) this.expandedCats.add(p); await this.refreshTree(); }
   async _newPrompt(cat) { const n = await psPrompt("New Prompt", "", "Prompt name..."); if (!n) return; await psApi.savePrompt(n, cat, "", ""); if (cat) this.expandedCats.add(cat); this.selectedPath = cat ? `${cat}\\${n}` : n; await this.refreshTree(); this.loadPrompt(this.selectedPath); }
+  async _duplicatePrompt(n) {
+    const newName = await psPrompt("Duplicate Prompt", `${n.name} (copy)`, "New prompt name...");
+    if (!newName) return;
+    const data = await psApi.loadPrompt(n.path);
+    if (data.error) return;
+    const cat = n.path.split("\\").slice(0, -1).join("\\");
+    await psApi.savePrompt(newName, cat, data.positive || "", data.negative || "");
+    if (cat) this.expandedCats.add(cat);
+    this.selectedPath = cat ? `${cat}\\${newName}` : newName;
+    await this.refreshTree();
+    this.loadPrompt(this.selectedPath);
+    psToast(`"${newName}" created`);
+  }
   async _renamePrompt(n) { const v = await psPrompt("Rename", n.name); if (!v || v === n.name) return; await psApi.renamePrompt(n.path, v); await this.refreshTree(); }
   async _renameCategory(n) { const v = await psPrompt("Rename", n.name); if (!v || v === n.name) return; await psApi.renameCategory(n.path, v); await this.refreshTree(); }
   async _deletePrompt(n) { if (!await psConfirm(`Delete "${n.name}"?`)) return; await psApi.deletePrompt(n.path); if (this.selectedPath === n.path) this._showEmpty(); await this.refreshTree(); }
