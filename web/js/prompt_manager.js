@@ -481,15 +481,18 @@ function setupPromptPair(node) {
     const origCat = catW.callback;
     catW.callback = async function(value) {
       if (origCat) origCat.call(this, value);
+      // Reload prompt list for this category
       await refreshPrompts(node, value);
-      // Reset prompt selection
+      // Reset prompt to none and clear fields
       const promptW = findWidget(node, "prompt");
       if (promptW) promptW.value = "(none)";
+      const posW = findWidget(node, "positive");
+      const negW = findWidget(node, "negative");
+      if (posW) posW.value = "";
+      if (negW) negW.value = "";
       node.setDirtyCanvas(true);
-      app.graph.setDirtyCanvas(true, true);
+      app.graph?.setDirtyCanvas?.(true, true);
     };
-    // Initial filter on node load
-    setTimeout(() => refreshPrompts(node, catW.value), 100);
   }
 
   // ── Auto-load on prompt change ──
@@ -503,6 +506,13 @@ function setupPromptPair(node) {
         if (info) {
           await loadPrompt(node, info.path);
         }
+      } else {
+        // Clear fields when (none) selected
+        const posW = findWidget(node, "positive");
+        const negW = findWidget(node, "negative");
+        if (posW) posW.value = "";
+        if (negW) negW.value = "";
+        node.setDirtyCanvas(true);
       }
     };
   }
@@ -518,6 +528,33 @@ function setupPromptPair(node) {
       scheduleAutoSave(node);
     };
   }
+
+  // ── Initial load on workflow open ──
+  // Refresh categories and prompts, validate current selection
+  setTimeout(async () => {
+    await refreshCategories(node);
+    const catW = findWidget(node, "category");
+    const promptW = findWidget(node, "prompt");
+    const currentCat = catW?.value || "(all)";
+    await refreshPrompts(node, currentCat);
+
+    // Check if the currently selected prompt exists in the filtered list
+    if (promptW && promptW.value && promptW.value !== "(none)") {
+      const info = getPromptInfo(promptW.value);
+      if (info) {
+        // Load its content
+        await loadPrompt(node, info.path);
+      } else {
+        // Prompt doesn't exist in this category — reset
+        promptW.value = "(none)";
+        const posW = findWidget(node, "positive");
+        const negW = findWidget(node, "negative");
+        if (posW) posW.value = "";
+        if (negW) negW.value = "";
+      }
+    }
+    node.setDirtyCanvas(true);
+  }, 200);
 }
 
 async function loadPrompt(node, path) {

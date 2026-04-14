@@ -288,6 +288,7 @@ class PromptStudio {
     this.treeData = [];
     this.saveTimer = null;
     this.activeTab = "editor";
+    this.fontSize = 13;
   }
 
   toggle() {
