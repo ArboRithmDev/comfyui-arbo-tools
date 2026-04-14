@@ -30,12 +30,11 @@ class PromptPair:
     @classmethod
     def INPUT_TYPES(s):
         categories = ["(all)"] + list_categories()
-        prompts = ["(none)"] + list_prompt_names()
 
         return {
             "required": {
                 "category": (categories,),
-                "prompt": (prompts,),
+                "prompt": (["(none)"],),
                 "auto_save": ("BOOLEAN", {"default": False}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),

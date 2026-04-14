@@ -323,11 +323,18 @@ function findWidget(node, name) {
 }
 
 function updateComboOptions(widget, options) {
-  if (widget.options?.values) {
-    widget.options.values = options;
-  }
-  if (widget.type === "combo") {
-    widget.options.values = options;
+  // Update all possible locations where ComfyUI stores combo values
+  if (widget.options) widget.options.values = options;
+  if (widget.inputEl) {
+    // DOM select element — rebuild options
+    widget.inputEl.innerHTML = "";
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      if (opt === widget.value) o.selected = true;
+      widget.inputEl.appendChild(o);
+    }
   }
 }
 
