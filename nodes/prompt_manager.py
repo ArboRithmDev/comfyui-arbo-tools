@@ -34,13 +34,15 @@ class PromptPair:
         return {
             "required": {
                 "category": (categories,),
-                "prompt": (["(none)"],),
                 "auto_save": ("BOOLEAN", {"default": False}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
                 "neg_general": ("STRING", {"forceInput": True}),
+            },
+            "hidden": {
+                "selected_prompt": "STRING",
             },
         }
 
@@ -58,10 +60,11 @@ class PromptPair:
     def IS_CHANGED(s, **kwargs):
         return float("nan")
 
-    def execute(self, category, prompt, auto_save,
-                positive, negative, neg_general=""):
+    def execute(self, category, auto_save,
+                positive, negative, neg_general="", selected_prompt=""):
 
         # Always read the latest version from disk (studio may have updated it)
+        prompt = selected_prompt
         if prompt and prompt != "(none)":
             saved = get_prompt_by_path(prompt)
             if not saved:
