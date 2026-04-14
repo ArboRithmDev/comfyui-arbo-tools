@@ -34,7 +34,7 @@ class PromptPair:
         return {
             "required": {
                 "category": (categories,),
-                "prompt": ("STRING", {"default": "(none)"}),
+                "prompt": (["(none)"],),
                 "auto_save": ("BOOLEAN", {"default": False}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),
