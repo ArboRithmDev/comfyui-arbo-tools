@@ -172,9 +172,10 @@ async def api_save_config(request: web.Request) -> web.Response:
 
 
 @routes.get("/arbo-tools/studio/models")
-async def api_list_models(_request: web.Request) -> web.Response:
+async def api_list_models(request: web.Request) -> web.Response:
     config = _load_config()
-    provider = config.get("provider", "ollama")
+    # Allow provider override from query param (UI may not have saved yet)
+    provider = request.query.get("provider", config.get("provider", "ollama"))
     models = []
     if provider == "ollama":
         models = await _list_ollama_models(config)

@@ -119,7 +119,7 @@ const psApi = {
       body: JSON.stringify({ positive, negative, level, config: psConfig }),
     });
   },
-  listLLMs() { return this.fetch(`${PS_API}/studio/models`); },
+  listLLMs(provider) { return this.fetch(`${PS_API}/studio/models${provider ? "?provider=" + provider : ""}`); },
 };
 
 // ══════════════════════════════════════════════════════════════════════
@@ -474,8 +474,9 @@ class PromptStudio {
     contentEl.onchange = updateVisibility;
     updateVisibility();
 
-    // Refresh models
+    // Refresh models on click and on provider change
     p.querySelector("#ps-cfg-refresh-models").onclick = () => this._refreshModels();
+    providerEl.addEventListener("change", () => this._refreshModels());
     this._refreshModels();
 
     // Save
@@ -495,9 +496,11 @@ class PromptStudio {
 
   async _refreshModels() {
     const modelSelect = this.panel.querySelector("#ps-cfg-model");
+    const providerEl = this.panel.querySelector("#ps-cfg-provider");
+    const currentProvider = providerEl?.value || psConfig.provider;
     modelSelect.innerHTML = `<option value="">Loading...</option>`;
     try {
-      const data = await psApi.listLLMs();
+      const data = await psApi.listLLMs(currentProvider);
       const models = data.models || [];
       if (models.length === 0) {
         modelSelect.innerHTML = `<option value="">(no models found)</option>`;
