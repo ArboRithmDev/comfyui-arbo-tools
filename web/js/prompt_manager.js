@@ -214,7 +214,7 @@ function openPicker(node, widget, getOptions, onSelected) {
       item.onclick = () => {
         widget.value = opt;
         close();
-        node.setDirtyCanvas(true);
+        node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
         onSelected(opt);
       };
       list.appendChild(item);
@@ -259,7 +259,7 @@ async function loadPromptIntoNode(node, path) {
     const data = await (await fetch(`${API}/prompts/load?path=${encodeURIComponent(path)}`)).json();
     const posW = findWidget(node, "positive"); if (posW && data.positive != null) posW.value = data.positive;
     const negW = findWidget(node, "negative"); if (negW && data.negative != null) negW.value = data.negative;
-    node.setDirtyCanvas(true);
+    node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
   } catch { /* silent */ }
 }
 
@@ -307,7 +307,7 @@ function setupPromptPair(node) {
       } else {
         const posW = findWidget(node, "positive"); if (posW) posW.value = "";
         const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-        node.setDirtyCanvas(true);
+        node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
       }
     }
   );
@@ -323,7 +323,7 @@ function setupPromptPair(node) {
       await fetch(`${API}/prompts/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: v.cat }) });
       invalidateCategoryCache(); await refreshCategories(node);
       const catW = findWidget(node, "category"); if (catW) catW.value = v.cat;
-      node.setDirtyCanvas(true);
+      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     });
   });
 
@@ -345,7 +345,7 @@ function setupPromptPair(node) {
       promptWidget.value = v.name;
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-      node.setDirtyCanvas(true);
+      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     });
   });
 
@@ -367,7 +367,7 @@ function setupPromptPair(node) {
       promptWidget.value = "(none)";
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-      node.setDirtyCanvas(true);
+      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     };
   }
 
@@ -403,7 +403,7 @@ function setupPromptPair(node) {
       const info = getPromptInfo(node._arboSelectedPrompt);
       if (info) await loadPromptIntoNode(node, info.path);
     }
-    node.setDirtyCanvas(true);
+    node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
   }, 300);
 }
 
