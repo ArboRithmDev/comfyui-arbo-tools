@@ -637,6 +637,9 @@ class PromptStudio {
           ${cat ? `<span class="ps-editor-cat">${cat}</span>` : ""}
         </div>
         <div class="ps-enhance-bar">
+          <button class="ps-btn ps-btn-fontsize" id="ps-font-down" title="Decrease font size">A-</button>
+          <button class="ps-btn ps-btn-fontsize" id="ps-font-up" title="Increase font size">A+</button>
+          <span class="ps-separator">|</span>
           <select id="ps-enhance-level">
             ${Object.entries(ENHANCE_LEVELS).map(([k, v]) =>
               `<option value="${k}" ${psConfig.enhance_level === k ? "selected" : ""}>${v.label}</option>`
@@ -654,16 +657,25 @@ class PromptStudio {
     const posEl = editor.querySelector("#ps-pos");
     const negEl = editor.querySelector("#ps-neg");
 
-    // Auto-save
+    // Apply current font size
+    posEl.style.fontSize = (this.fontSize || 13) + "px";
+    negEl.style.fontSize = (this.fontSize || 13) + "px";
+
+    // Auto-save + sync to widget nodes
     for (const el of [posEl, negEl]) {
       el.addEventListener("input", () => {
         clearTimeout(this.saveTimer);
         this.saveTimer = setTimeout(async () => {
           await psApi.savePrompt(name, cat, posEl.value, negEl.value);
           psToast(`"${name}" saved`);
+          this._syncToWidgets(path, posEl.value, negEl.value);
         }, 400);
       });
     }
+
+    // Font size buttons
+    editor.querySelector("#ps-font-down").onclick = () => this._changeFontSize(-1);
+    editor.querySelector("#ps-font-up").onclick = () => this._changeFontSize(1);
 
     // Enhance button
     editor.querySelector("#ps-enhance-btn").onclick = async () => {
@@ -691,6 +703,31 @@ class PromptStudio {
     if (this.activeTab !== "editor") {
       this.panel.querySelector('.ps-tab[data-tab="editor"]').click();
     }
+  }
+
+  _syncToWidgets(path, positive, negative) {
+    // Find all PromptPair nodes and update those displaying the same prompt
+    if (!app.graph) return;
+    for (const node of app.graph._nodes || []) {
+      if (node.comfyClass !== "ArboTools_PromptPair") continue;
+      const promptW = node.widgets?.find(w => w.name === "prompt");
+      if (!promptW) continue;
+      // Check if this widget is showing the same prompt (by name match)
+      const promptName = path.split("\\").pop();
+      if (promptW.value === promptName || promptW.value === path) {
+        const posW = node.widgets?.find(w => w.name === "positive");
+        const negW = node.widgets?.find(w => w.name === "negative");
+        if (posW) posW.value = positive;
+        if (negW) negW.value = negative;
+        node.setDirtyCanvas?.(true);
+      }
+    }
+  }
+
+  _changeFontSize(delta) {
+    this.fontSize = Math.max(9, Math.min(22, (this.fontSize || 13) + delta));
+    const textareas = this.panel?.querySelectorAll(".ps-textarea");
+    if (textareas) textareas.forEach(t => t.style.fontSize = this.fontSize + "px");
   }
 
   _showEmpty() {
@@ -745,6 +782,9 @@ PS_STYLE.textContent = `
   .ps-btn-enhance { background:#4ecdc4;color:#1e1e2e;border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer; }
   .ps-btn-enhance:hover { background:#3dbdb5; }
   .ps-btn-enhance:disabled { opacity:.5;cursor:wait; }
+  .ps-btn-fontsize { background:#333;color:#aaa;border:none;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600; }
+  .ps-btn-fontsize:hover { background:#444;color:#4ecdc4; }
+  .ps-separator { color:#444;margin:0 2px; }
   .ps-editor-body { flex:1;display:flex;flex-direction:column;overflow:hidden; }
   .ps-field { flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:80px; }
   .ps-field-label { padding:6px 16px 2px;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0; }
