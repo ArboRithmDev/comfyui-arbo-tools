@@ -18,9 +18,58 @@ _DATA_DIR = Path(__file__).parent.parent.parent.parent / "user" / "default" / "p
 _CONFIG_FILE = _DATA_DIR / "_studio_config.json"
 
 ENHANCE_SYSTEM = {
-    "light": "Slightly improve this prompt: fix grammar, clarify meaning, keep it close to the original. ",
-    "medium": "Enhance this prompt: add relevant details about composition, lighting, colors, textures, mood. Enrich without changing the core intent. ",
-    "heavy": "Creatively rewrite this prompt: reimagine with vivid details, artistic direction, dramatic composition. Transform it into something visually striking. ",
+    "light": "Slightly improve this prompt: fix grammar, clarify meaning, keep it very close to the original. ",
+    "medium": "Enhance this prompt: add relevant details about composition, lighting, colors, textures, mood. Enrich without changing the core intent or structure. ",
+    "heavy": "Creatively rewrite this prompt: reimagine with vivid details, artistic direction, dramatic composition. Keep the same subject and scene but make it visually striking. ",
+}
+
+# Prompt style → system prompt mapping
+FAMILY_STYLE = {
+    "sd15": "tags", "sdxl": "tags",
+    "illustrious": "mixed", "pony": "mixed",
+    "flux": "natural", "qwen": "natural", "wan": "natural", "audio": "natural",
+}
+
+BASE_SYSTEM_PROMPTS = {
+    "tags": """You are a prompt engineer for Stable Diffusion image generation models.
+
+CRITICAL FORMAT RULES — VIOLATION MEANS FAILURE:
+- Preserve ALL (keyword:weight) syntax EXACTLY as-is. Example: (cinematic:1.4) must remain (cinematic:1.4)
+- Preserve ALL parentheses — every ( must have a matching )
+- Use comma-separated tags and weighted keywords
+- Do NOT add quotes or backticks around the output
+- Do NOT add explanations, labels, headers, or commentary
+- Do NOT output "Positive:" or "Negative:" labels
+- Do NOT duplicate the prompt or provide alternatives
+- Output ONLY the raw improved prompt text, nothing else
+
+Improve by adding: quality tags, style descriptors, lighting, composition details.""",
+
+    "mixed": """You are a prompt engineer for image generation models (Illustrious, Pony, SDXL).
+
+CRITICAL FORMAT RULES — VIOLATION MEANS FAILURE:
+- Preserve ALL (keyword:weight) syntax EXACTLY as-is. Example: (full body shot:1.4) must remain (full body shot:1.4)
+- Preserve ALL parentheses — every ( must have a matching )
+- You can mix natural language sentences with weighted tags
+- Do NOT add quotes or backticks around the output
+- Do NOT add explanations, labels, headers, or commentary
+- Do NOT output "Positive:" or "Negative:" labels
+- Do NOT duplicate the prompt or provide alternatives
+- Output ONLY the raw improved prompt text, nothing else
+
+Improve by enriching: character details, clothing, pose, expression, environment, lighting, composition, artistic style. Keep the same structure and all weighted emphasis.""",
+
+    "natural": """You are a prompt engineer for modern image/video generation models (Flux, Qwen, WAN).
+
+CRITICAL FORMAT RULES — VIOLATION MEANS FAILURE:
+- Use natural language descriptions, NOT tags or (weight) syntax
+- Do NOT add quotes or backticks around the output
+- Do NOT add explanations, labels, headers, or commentary
+- Do NOT output "Positive:" or "Negative:" labels
+- Do NOT duplicate the prompt or provide alternatives
+- Output ONLY the raw improved prompt text, nothing else
+
+Improve with: vivid descriptions, camera angle, lighting, mood, colors, textures, composition.""",
 }
 
 
@@ -121,20 +170,36 @@ async def _call_anthropic(prompt: str, system: str, config: dict) -> str:
             return content[0].get("text", "").strip() if content else ""
 
 
+def _clean_llm_output(text: str) -> str:
+    """Remove quotes, labels, and other LLM artifacts from output."""
+    t = text.strip()
+    # Remove wrapping quotes
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
+    # Remove markdown code blocks
+    if t.startswith("```"):
+        t = t.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    # Remove "Positive prompt:" / "Positive:" prefix
+    for prefix in ("Positive prompt:", "Positive:", "Improved positive prompt:", "Improved prompt:"):
+        if t.lower().startswith(prefix.lower()):
+            t = t[len(prefix):].strip()
+    return t
+
+
 async def enhance_prompt(positive: str, negative: str, level: str, config: dict) -> dict[str, str]:
     """Enhance a prompt using the configured LLM."""
     provider = config.get("provider", "ollama")
     system_override = config.get("system_prompt_override", "")
 
-    # Build system prompt
-    base_system = system_override or config.get("_resolved_system", "")
+    # Resolve system prompt from model family
+    family = config.get("model_family", "sdxl")
+    style = FAMILY_STYLE.get(family, "mixed")
+    base_system = system_override or BASE_SYSTEM_PROMPTS.get(style, BASE_SYSTEM_PROMPTS["mixed"])
     level_prefix = ENHANCE_SYSTEM.get(level, ENHANCE_SYSTEM["medium"])
-    system = level_prefix + base_system
+    system = level_prefix + "\n\n" + base_system
 
-    user_prompt = f"Positive prompt:\n{positive}"
-    if negative:
-        user_prompt += f"\n\nNegative prompt:\n{negative}"
-    user_prompt += "\n\nImprove this prompt. Output ONLY the improved positive prompt (and negative if provided), clearly separated."
+    # Only ask to enhance the positive prompt — negative is kept as-is
+    user_prompt = f"{positive}"
 
     try:
         if provider == "ollama":
@@ -151,15 +216,11 @@ async def enhance_prompt(positive: str, negative: str, level: str, config: dict)
         if not response:
             return {"error": "Empty response from LLM"}
 
-        # Parse response — try to split positive/negative
-        parts = response.split("Negative prompt:", 1) if "Negative prompt:" in response else \
-                response.split("Negative:", 1) if "Negative:" in response else [response]
+        # Clean the output
+        cleaned = _clean_llm_output(response)
 
-        result = {"positive": parts[0].replace("Positive prompt:", "").replace("Positive:", "").strip()}
-        if len(parts) > 1:
-            result["negative"] = parts[1].strip()
-
-        return result
+        # Only return positive — don't touch the negative
+        return {"positive": cleaned}
 
     except Exception as e:
         return {"error": str(e)}
