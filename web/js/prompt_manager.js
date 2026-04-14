@@ -28,14 +28,14 @@ STYLE.textContent = `
   .arbo-autocomplete .ac-new { padding:6px 10px;font-size:11px;color:#888;border-top:1px solid #333;font-style:italic; }
   .arbo-toast { position:fixed;bottom:24px;right:24px;z-index:100001;background:#1e1e2e;border:1px solid #4ecdc4;border-radius:8px;padding:10px 18px;font-family:-apple-system,sans-serif;font-size:12px;color:#4ecdc4;opacity:0;transform:translateY(10px);transition:opacity .2s,transform .2s;pointer-events:none; }
   .arbo-toast.show { opacity:1;transform:translateY(0); }
-  .arbo-prompt-picker { position:fixed;z-index:100000;background:#1e1e2e;border:1px solid #555;border-radius:10px;padding:8px 0;min-width:280px;max-height:350px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:-apple-system,sans-serif; }
-  .arbo-prompt-picker input { margin:4px 8px 6px;padding:6px 10px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:12px;outline:none;box-sizing:border-box;width:calc(100% - 16px); }
-  .arbo-prompt-picker input:focus { border-color:#4ecdc4; }
-  .arbo-prompt-picker-list { flex:1;overflow-y:auto; }
-  .arbo-prompt-picker-item { padding:6px 14px;font-size:12px;color:#ccc;cursor:pointer; }
-  .arbo-prompt-picker-item:hover { background:#2a2a3a;color:#4ecdc4; }
-  .arbo-prompt-picker-item.selected { background:#333;color:#4ecdc4; }
-  .arbo-prompt-picker-overlay { position:fixed;inset:0;z-index:99999; }
+  .arbo-picker { position:fixed;z-index:100000;background:#1e1e2e;border:1px solid #555;border-radius:8px;padding:4px 0;min-width:260px;max-width:400px;max-height:300px;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-family:-apple-system,sans-serif; }
+  .arbo-picker-search { margin:6px 8px;padding:6px 10px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:12px;outline:none;box-sizing:border-box;width:calc(100% - 16px); }
+  .arbo-picker-search:focus { border-color:#4ecdc4; }
+  .arbo-picker-list { flex:1;overflow-y:auto;padding:2px 0; }
+  .arbo-picker-item { padding:5px 12px;font-size:12px;color:#ccc;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .arbo-picker-item:hover { background:#2a2a3a;color:#fff; }
+  .arbo-picker-item.sel { color:#4ecdc4;background:#252536; }
+  .arbo-picker-overlay { position:fixed;inset:0;z-index:99999; }
 `;
 
 // ── State ───────────────────────────────────────────────────────────
@@ -93,43 +93,114 @@ function showPopup(title, fields, onConfirm) {
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
 }
 
-// ── Prompt picker (replaces broken combo) ───────────────────────────
+// ── Custom combo widget (drawn on canvas) ───────────────────────────
 
-function showPromptPicker(node, btnWidget) {
-  document.querySelectorAll(".arbo-prompt-picker,.arbo-prompt-picker-overlay").forEach(el => el.remove());
+function addCustomComboWidget(node, name, defaultValue, getOptions, onSelected) {
+  const widget = {
+    type: "custom",
+    name: name,
+    value: defaultValue,
+    options: {},
+    y: 0,
+    _height: 26,
 
-  const options = node._arboFilteredPrompts || ["(none)"];
-  const currentValue = node._arboSelectedPrompt || "(none)";
+    draw(ctx, node, widgetWidth, posY, height) {
+      this.y = posY;
+      this._height = height;
+      const margin = 16;
+      const w = widgetWidth - margin * 2;
+
+      // Background
+      ctx.fillStyle = "#353542";
+      ctx.beginPath();
+      ctx.roundRect(margin, posY, w, height, 5);
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Label (left, dimmed)
+      ctx.fillStyle = "#999";
+      ctx.font = "11px -apple-system, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("prompt", margin + 8, posY + height / 2);
+
+      // Value (right of label)
+      ctx.fillStyle = "#e0e0e0";
+      ctx.font = "12px -apple-system, sans-serif";
+      const labelWidth = ctx.measureText("prompt").width + 16;
+      const maxTextWidth = w - labelWidth - 28;
+      let displayText = this.value || "(none)";
+      // Truncate if too long
+      while (ctx.measureText(displayText).width > maxTextWidth && displayText.length > 3) {
+        displayText = displayText.slice(0, -4) + "...";
+      }
+      ctx.fillText(displayText, margin + labelWidth, posY + height / 2);
+
+      // Arrow ▼
+      ctx.fillStyle = "#888";
+      ctx.textAlign = "right";
+      ctx.fillText("▼", margin + w - 8, posY + height / 2);
+    },
+
+    mouse(event, pos, node) {
+      if (event.type === "pointerdown") {
+        openPicker(node, this, getOptions, onSelected);
+        return true;
+      }
+      return false;
+    },
+
+    computeSize(width) {
+      return [width, 26];
+    },
+
+    serializeValue(nodeId, widgetIndex) {
+      return this.value;
+    },
+  };
+
+  node.addCustomWidget(widget);
+  return widget;
+}
+
+function openPicker(node, widget, getOptions, onSelected) {
+  document.querySelectorAll(".arbo-picker,.arbo-picker-overlay").forEach(el => el.remove());
+
+  const options = getOptions();
+  const current = widget.value;
+
+  // Position: get canvas transform to place picker near the widget
+  const canvas = app.canvas?.canvas || document.querySelector("canvas");
+  const rect = canvas?.getBoundingClientRect() || { left: 0, top: 0 };
+  const ds = app.canvas?.ds || {};
+  const scale = ds.scale || 1;
+  const ox = (ds.offset?.[0] || 0);
+  const oy = (ds.offset?.[1] || 0);
+  const px = rect.left + (node.pos[0] + 16 + ox) * scale;
+  const py = rect.top + (node.pos[1] + (widget.y || 60) + 30 + oy) * scale;
 
   const overlay = document.createElement("div");
-  overlay.className = "arbo-prompt-picker-overlay";
+  overlay.className = "arbo-picker-overlay";
 
   const picker = document.createElement("div");
-  picker.className = "arbo-prompt-picker";
-
-  // Position near the button widget
-  const canvas = app.canvas?.canvas || document.querySelector("canvas");
-  if (canvas) {
-    const rect = canvas.getBoundingClientRect();
-    const s = app.canvas?.ds?.scale || 1;
-    const ox = app.canvas?.ds?.offset?.[0] || 0;
-    const oy = app.canvas?.ds?.offset?.[1] || 0;
-    const nx = (node.pos[0] + ox) * s + rect.left;
-    const ny = (node.pos[1] + oy) * s + rect.top + 80 * s;
-    picker.style.left = Math.min(nx, window.innerWidth - 300) + "px";
-    picker.style.top = Math.min(ny, window.innerHeight - 360) + "px";
-  } else {
-    picker.style.left = "100px";
-    picker.style.top = "100px";
-  }
+  picker.className = "arbo-picker";
+  picker.style.left = Math.max(4, Math.min(px, window.innerWidth - 280)) + "px";
+  picker.style.top = Math.max(4, Math.min(py, window.innerHeight - 310)) + "px";
+  // Match the widget width
+  picker.style.width = Math.max(260, (node.size?.[0] || 300) * scale - 32) + "px";
 
   const search = document.createElement("input");
+  search.className = "arbo-picker-search";
   search.type = "text";
-  search.placeholder = "Search prompts...";
+  search.placeholder = "Search...";
   picker.appendChild(search);
 
   const list = document.createElement("div");
-  list.className = "arbo-prompt-picker-list";
+  list.className = "arbo-picker-list";
   picker.appendChild(list);
 
   function render(filter = "") {
@@ -138,45 +209,26 @@ function showPromptPicker(node, btnWidget) {
     for (const opt of options) {
       if (f && !opt.toLowerCase().includes(f)) continue;
       const item = document.createElement("div");
-      item.className = `arbo-prompt-picker-item${opt === currentValue ? " selected" : ""}`;
+      item.className = `arbo-picker-item${opt === current ? " sel" : ""}`;
       item.textContent = opt;
       item.onclick = () => {
-        node._arboSelectedPrompt = opt;
-        btnWidget.name = `prompt: ${opt}`;
-        overlay.remove();
-        picker.remove();
+        widget.value = opt;
+        close();
         node.setDirtyCanvas(true);
-        onPromptSelected(node, opt);
+        onSelected(opt);
       };
       list.appendChild(item);
     }
   }
 
+  function close() { overlay.remove(); picker.remove(); }
+  overlay.onclick = close;
   search.addEventListener("input", () => render(search.value));
-  render();
 
-  overlay.onclick = () => { overlay.remove(); picker.remove(); };
   document.body.appendChild(overlay);
   document.body.appendChild(picker);
+  render();
   setTimeout(() => search.focus(), 50);
-}
-
-async function onPromptSelected(node, displayName) {
-  if (!displayName || displayName === "(none)") {
-    const posW = findWidget(node, "positive"); if (posW) posW.value = "";
-    const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-    node.setDirtyCanvas(true);
-    return;
-  }
-  const info = getPromptInfo(displayName);
-  if (info) {
-    try {
-      const data = await (await fetch(`${API}/prompts/load?path=${encodeURIComponent(info.path)}`)).json();
-      const posW = findWidget(node, "positive"); if (posW && data.positive != null) posW.value = data.positive;
-      const negW = findWidget(node, "negative"); if (negW && data.negative != null) negW.value = data.negative;
-      node.setDirtyCanvas(true);
-    } catch { /* silent */ }
-  }
 }
 
 // ── Prompt filtering ────────────────────────────────────────────────
@@ -201,6 +253,15 @@ async function refreshPrompts(node, category = "") {
 }
 
 function getPromptInfo(displayName) { return _promptPathMap[displayName] || null; }
+
+async function loadPromptIntoNode(node, path) {
+  try {
+    const data = await (await fetch(`${API}/prompts/load?path=${encodeURIComponent(path)}`)).json();
+    const posW = findWidget(node, "positive"); if (posW && data.positive != null) posW.value = data.positive;
+    const negW = findWidget(node, "negative"); if (negW && data.negative != null) negW.value = data.negative;
+    node.setDirtyCanvas(true);
+  } catch { /* silent */ }
+}
 
 // ── Auto-save ───────────────────────────────────────────────────────
 
@@ -230,16 +291,28 @@ async function doAutoSave(node) {
 // ── Node setup ──────────────────────────────────────────────────────
 
 function setupPromptPair(node) {
-  // Initialize state
   if (!node._arboSelectedPrompt) node._arboSelectedPrompt = "(none)";
   if (!node._arboFilteredPrompts) node._arboFilteredPrompts = ["(none)"];
 
-  // ── Prompt selector button (replaces combo) ──
-  const promptBtn = node.addWidget("button", `prompt: ${node._arboSelectedPrompt}`, null, () => {
-    showPromptPicker(node, promptBtn);
-  });
+  // ── Custom combo for prompt selection ──
+  const promptWidget = addCustomComboWidget(
+    node, "prompt_selector",
+    node._arboSelectedPrompt,
+    () => node._arboFilteredPrompts || ["(none)"],
+    async (value) => {
+      node._arboSelectedPrompt = value;
+      if (value && value !== "(none)") {
+        const info = getPromptInfo(value);
+        if (info) await loadPromptIntoNode(node, info.path);
+      } else {
+        const posW = findWidget(node, "positive"); if (posW) posW.value = "";
+        const negW = findWidget(node, "negative"); if (negW) negW.value = "";
+        node.setDirtyCanvas(true);
+      }
+    }
+  );
 
-  // ── "+" category button ──
+  // ── Buttons ──
   const addCatBtn = node.addWidget("button", "➕ New Category", null, () => {
     showPopup("New Category", [{
       id: "cat", label: "Category path", placeholder: "e.g. Personnages\\Fantasy\\Elfes",
@@ -254,7 +327,6 @@ function setupPromptPair(node) {
     });
   });
 
-  // ── "New prompt" button ──
   const newPromptBtn = node.addWidget("button", "📝 New Prompt", null, () => {
     const catW = findWidget(node, "category");
     const currentCat = catW?.value !== "(all)" ? catW?.value || "" : "";
@@ -270,21 +342,21 @@ function setupPromptPair(node) {
       const catW = findWidget(node, "category"); if (catW && v.cat) catW.value = v.cat;
       await refreshPrompts(node, v.cat || "(all)");
       node._arboSelectedPrompt = v.name;
-      promptBtn.name = `prompt: ${v.name}`;
+      promptWidget.value = v.name;
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
       node.setDirtyCanvas(true);
     });
   });
 
-  // ── Reorder widgets ──
-  const order = ["category", addCatBtn.name, promptBtn.name, newPromptBtn.name, "auto_save", "positive", "negative"];
+  // ── Reorder ──
+  const order = ["category", addCatBtn.name, "prompt_selector", newPromptBtn.name, "auto_save", "positive", "negative"];
   node.widgets.sort((a, b) => {
     const ai = order.indexOf(a.name); const bi = order.indexOf(b.name);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
 
-  // ── Category change → filter prompts ──
+  // ── Category change ──
   const catW = findWidget(node, "category");
   if (catW) {
     const origCat = catW.callback;
@@ -292,7 +364,7 @@ function setupPromptPair(node) {
       if (origCat) origCat.call(this, value);
       await refreshPrompts(node, value);
       node._arboSelectedPrompt = "(none)";
-      promptBtn.name = "📄 (none)";
+      promptWidget.value = "(none)";
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
       node.setDirtyCanvas(true);
@@ -307,11 +379,10 @@ function setupPromptPair(node) {
     w.callback = function(value) { if (origCb) origCb.call(this, value); scheduleAutoSave(node); };
   }
 
-  // ── Serialize selected prompt into hidden field ──
+  // ── Persist selected prompt across save/load ──
   const origSerialize = node.onSerialize;
   node.onSerialize = function(o) {
     if (origSerialize) origSerialize.call(this, o);
-    if (!o.widgets_values) o.widgets_values = [];
     o._arboSelectedPrompt = node._arboSelectedPrompt || "(none)";
   };
   const origConfigure = node.onConfigure;
@@ -319,7 +390,7 @@ function setupPromptPair(node) {
     if (origConfigure) origConfigure.call(this, o);
     if (o._arboSelectedPrompt) {
       node._arboSelectedPrompt = o._arboSelectedPrompt;
-      promptBtn.name = `prompt: ${o._arboSelectedPrompt}`;
+      promptWidget.value = o._arboSelectedPrompt;
     }
   };
 
@@ -328,7 +399,9 @@ function setupPromptPair(node) {
     await refreshCategories(node);
     await refreshPrompts(node, catW?.value || "(all)");
     if (node._arboSelectedPrompt && node._arboSelectedPrompt !== "(none)") {
-      await onPromptSelected(node, node._arboSelectedPrompt);
+      promptWidget.value = node._arboSelectedPrompt;
+      const info = getPromptInfo(node._arboSelectedPrompt);
+      if (info) await loadPromptIntoNode(node, info.path);
     }
     node.setDirtyCanvas(true);
   }, 300);
