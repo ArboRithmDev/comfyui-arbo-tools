@@ -142,7 +142,7 @@ function showPromptPicker(node, btnWidget) {
       item.textContent = opt;
       item.onclick = () => {
         node._arboSelectedPrompt = opt;
-        btnWidget.name = `📄 ${opt}`;
+        btnWidget.name = `prompt: ${opt}`;
         overlay.remove();
         picker.remove();
         node.setDirtyCanvas(true);
@@ -235,7 +235,7 @@ function setupPromptPair(node) {
   if (!node._arboFilteredPrompts) node._arboFilteredPrompts = ["(none)"];
 
   // ── Prompt selector button (replaces combo) ──
-  const promptBtn = node.addWidget("button", `📄 ${node._arboSelectedPrompt}`, null, () => {
+  const promptBtn = node.addWidget("button", `prompt: ${node._arboSelectedPrompt}`, null, () => {
     showPromptPicker(node, promptBtn);
   });
 
@@ -270,7 +270,7 @@ function setupPromptPair(node) {
       const catW = findWidget(node, "category"); if (catW && v.cat) catW.value = v.cat;
       await refreshPrompts(node, v.cat || "(all)");
       node._arboSelectedPrompt = v.name;
-      promptBtn.name = `📄 ${v.name}`;
+      promptBtn.name = `prompt: ${v.name}`;
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
       node.setDirtyCanvas(true);
@@ -319,7 +319,7 @@ function setupPromptPair(node) {
     if (origConfigure) origConfigure.call(this, o);
     if (o._arboSelectedPrompt) {
       node._arboSelectedPrompt = o._arboSelectedPrompt;
-      promptBtn.name = `📄 ${o._arboSelectedPrompt}`;
+      promptBtn.name = `prompt: ${o._arboSelectedPrompt}`;
     }
   };
 
