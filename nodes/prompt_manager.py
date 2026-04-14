@@ -36,10 +36,14 @@ class PromptPair:
                 "category": (categories,),
                 "prompt": ("STRING", {"default": "(none)", "multiline": False}),
                 "auto_save": ("BOOLEAN", {"default": False}),
+                "concatenate": ("BOOLEAN", {"default": False, "label_on": "Chain ON", "label_off": "Chain OFF"}),
+                "separator": ("STRING", {"default": "\n", "multiline": False, "placeholder": "Separator (default: newline)"}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
+                "prev_positive": ("STRING", {"forceInput": True}),
+                "prev_negative": ("STRING", {"forceInput": True}),
                 "neg_general": ("STRING", {"forceInput": True}),
             },
             "hidden": {
@@ -61,8 +65,10 @@ class PromptPair:
     def IS_CHANGED(s, **kwargs):
         return float("nan")
 
-    def execute(self, category, prompt, auto_save,
-                positive, negative, neg_general="", selected_prompt=""):
+    def execute(self, category, prompt, auto_save, concatenate, separator,
+                positive, negative,
+                prev_positive="", prev_negative="", neg_general="",
+                selected_prompt=""):
 
         # Use selected_prompt from hidden if available, else widget value
         prompt = selected_prompt or prompt
@@ -78,10 +84,15 @@ class PromptPair:
                 positive = saved.get("positive", "")
                 negative = saved.get("negative", "")
 
-        # Build final negative: specific + optional general
-        if neg_general:
-            final_negative = f"{negative}, {neg_general}" if negative else neg_general
-        else:
-            final_negative = negative
+        # Concatenate with previous widget if chaining is enabled
+        sep = separator if separator else "\n"
+        if concatenate and prev_positive:
+            positive = f"{prev_positive}{sep}{positive}" if positive else prev_positive
+        if concatenate and prev_negative:
+            negative = f"{prev_negative}{sep}{negative}" if negative else prev_negative
 
-        return (positive, final_negative)
+        # Append general negative
+        if neg_general:
+            negative = f"{negative}, {neg_general}" if negative else neg_general
+
+        return (positive, negative)
