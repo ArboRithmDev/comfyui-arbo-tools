@@ -323,19 +323,120 @@ function findWidget(node, name) {
 }
 
 function updateComboOptions(widget, options) {
-  // Update all possible locations where ComfyUI stores combo values
   if (widget.options) widget.options.values = options;
-  if (widget.inputEl) {
-    // DOM select element — rebuild options
-    widget.inputEl.innerHTML = "";
+}
+
+// Custom prompt selector — replaces the STRING widget with a clickable dropdown
+function setupPromptSelector(node) {
+  const promptW = findWidget(node, "prompt");
+  if (!promptW) return;
+
+  // Store the available options on the widget
+  promptW._promptOptions = ["(none)"];
+
+  // Override the widget's draw to look like a combo
+  const origDraw = promptW.draw;
+  promptW.draw = function(ctx, node, width, y, height) {
+    // Draw as a combo-like widget
+    ctx.fillStyle = "#2a2a3a";
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 1;
+    const margin = 15;
+    const w = width - margin * 2;
+    ctx.beginPath();
+    ctx.roundRect(margin, y, w, height, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // Text
+    ctx.fillStyle = "#e0e0e0";
+    ctx.font = "12px -apple-system, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const displayText = this.value || "(none)";
+    ctx.fillText(displayText, margin + 8, y + height / 2);
+
+    // Arrow
+    ctx.fillStyle = "#888";
+    ctx.textAlign = "right";
+    ctx.fillText("▼", margin + w - 8, y + height / 2);
+  };
+
+  // Handle click — show our own dropdown
+  promptW.mouse = function(event, pos, node) {
+    if (event.type === "pointerdown" || event.type === "mousedown") {
+      showPromptDropdown(node, promptW);
+      return true;
+    }
+    return false;
+  };
+
+  return promptW;
+}
+
+function showPromptDropdown(node, widget) {
+  // Remove existing
+  document.querySelectorAll(".arbo-prompt-dropdown").forEach(el => el.remove());
+
+  const options = widget._promptOptions || ["(none)"];
+  const canvas = app.canvas?.canvas || document.querySelector("canvas");
+  if (!canvas) return;
+
+  // Get widget position on screen
+  const rect = canvas.getBoundingClientRect();
+  const transform = app.canvas?.ds || { scale: 1, offset: [0, 0] };
+  const scale = transform.scale || 1;
+
+  // Approximate position
+  const nodePos = node.pos || [0, 0];
+  const x = rect.left + (nodePos[0] + 15) * scale + (transform.offset?.[0] || 0) * scale;
+  const y = rect.top + (nodePos[1] + node.size[1] * 0.3) * scale + (transform.offset?.[1] || 0) * scale;
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "arbo-prompt-dropdown";
+  dropdown.style.cssText = `position:fixed;left:${x}px;top:${y + 30}px;z-index:100000;background:#1e1e2e;border:1px solid #555;border-radius:8px;padding:4px 0;min-width:200px;max-height:300px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.5);font-family:-apple-system,sans-serif;`;
+
+  // Search box
+  const search = document.createElement("input");
+  search.type = "text";
+  search.placeholder = "Search...";
+  search.style.cssText = "width:calc(100% - 16px);margin:4px 8px;padding:6px 8px;background:#2a2a3a;border:1px solid #444;border-radius:4px;color:#e0e0e0;font-size:12px;outline:none;box-sizing:border-box;";
+  dropdown.appendChild(search);
+
+  const list = document.createElement("div");
+  dropdown.appendChild(list);
+
+  function renderOptions(filter = "") {
+    list.innerHTML = "";
+    const f = filter.toLowerCase();
     for (const opt of options) {
-      const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
-      if (opt === widget.value) o.selected = true;
-      widget.inputEl.appendChild(o);
+      if (f && !opt.toLowerCase().includes(f)) continue;
+      const item = document.createElement("div");
+      item.style.cssText = `padding:6px 12px;font-size:12px;cursor:pointer;color:${opt === widget.value ? "#4ecdc4" : "#ccc"};${opt === widget.value ? "background:#2a2a3a;" : ""}`;
+      item.textContent = opt;
+      item.onmouseenter = () => item.style.background = "#333";
+      item.onmouseleave = () => item.style.background = opt === widget.value ? "#2a2a3a" : "";
+      item.onclick = () => {
+        widget.value = opt;
+        dropdown.remove();
+        overlay.remove();
+        if (widget.callback) widget.callback(opt);
+        node.setDirtyCanvas(true);
+      };
+      list.appendChild(item);
     }
   }
+
+  search.addEventListener("input", () => renderOptions(search.value));
+  renderOptions();
+
+  // Overlay to dismiss
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:99999;";
+  overlay.onclick = () => { dropdown.remove(); overlay.remove(); };
+  document.body.appendChild(overlay);
+  document.body.appendChild(dropdown);
+  setTimeout(() => search.focus(), 50);
 }
 
 // Maps: display name → {path, name, category, id} for the current filter
@@ -365,10 +466,11 @@ async function refreshPrompts(node, category = "") {
 
     const w = findWidget(node, "prompt");
     if (w) {
-      updateComboOptions(w, displayNames);
+      w._promptOptions = displayNames;
       if (w.value && w.value !== "(none)" && !displayNames.includes(w.value)) {
         w.value = "(none)";
       }
+      node.setDirtyCanvas(true);
     }
   } catch (e) { /* silent */ }
 }
@@ -380,6 +482,9 @@ function getPromptInfo(displayName) {
 // ── Node setup ──────────────────────────────────────────────────────
 
 function setupPromptPair(node) {
+  // ── Custom prompt selector (replaces broken combo) ──
+  setupPromptSelector(node);
+
   // ── "+" button after category ──
   const addCatBtn = node.addWidget("button", "➕ New Category", null, () => {
     showPopup("New Category", [
