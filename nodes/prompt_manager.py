@@ -34,6 +34,7 @@ class PromptPair:
         return {
             "required": {
                 "category": (categories,),
+                "prompt": ("STRING", {"default": "(none)", "multiline": False}),
                 "auto_save": ("BOOLEAN", {"default": False}),
                 "positive": ("STRING", {"default": "", "multiline": True}),
                 "negative": ("STRING", {"default": "", "multiline": True}),
@@ -60,11 +61,11 @@ class PromptPair:
     def IS_CHANGED(s, **kwargs):
         return float("nan")
 
-    def execute(self, category, auto_save,
+    def execute(self, category, prompt, auto_save,
                 positive, negative, neg_general="", selected_prompt=""):
 
-        # Always read the latest version from disk (studio may have updated it)
-        prompt = selected_prompt
+        # Use selected_prompt from hidden if available, else widget value
+        prompt = selected_prompt or prompt
         if prompt and prompt != "(none)":
             saved = get_prompt_by_path(prompt)
             if not saved:

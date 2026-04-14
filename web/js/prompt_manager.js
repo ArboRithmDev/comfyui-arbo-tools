@@ -45,8 +45,6 @@ let _promptPathMap = {};
 let _toastEl = null, _toastTimer = null;
 const _saveTimers = new WeakMap();
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
 function findWidget(node, name) { return node.widgets?.find(w => w.name === name); }
 
 function showToast(msg) {
@@ -93,109 +91,32 @@ function showPopup(title, fields, onConfirm) {
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
 }
 
-// ── Custom combo widget (drawn on canvas) ───────────────────────────
+// ── Picker dropdown ─────────────────────────────────────────────────
 
-function addCustomComboWidget(node, name, defaultValue, getOptions, onSelected) {
-  const widget = {
-    type: "custom",
-    name: name,
-    value: defaultValue,
-    options: {},
-    y: 0,
-    _height: 26,
-
-    draw(ctx, node, widgetWidth, posY, height) {
-      this.y = posY;
-      this._height = height;
-      const margin = 16;
-      const w = widgetWidth - margin * 2;
-
-      // Background
-      ctx.fillStyle = "#353542";
-      ctx.beginPath();
-      ctx.roundRect(margin, posY, w, height, 5);
-      ctx.fill();
-
-      // Border
-      ctx.strokeStyle = "#555";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Label (left, dimmed)
-      ctx.fillStyle = "#999";
-      ctx.font = "11px -apple-system, sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText("prompt", margin + 8, posY + height / 2);
-
-      // Value (right of label)
-      ctx.fillStyle = "#e0e0e0";
-      ctx.font = "12px -apple-system, sans-serif";
-      const labelWidth = ctx.measureText("prompt").width + 16;
-      const maxTextWidth = w - labelWidth - 28;
-      let displayText = this.value || "(none)";
-      // Truncate if too long
-      while (ctx.measureText(displayText).width > maxTextWidth && displayText.length > 3) {
-        displayText = displayText.slice(0, -4) + "...";
-      }
-      ctx.fillText(displayText, margin + labelWidth, posY + height / 2);
-
-      // Arrow ▼
-      ctx.fillStyle = "#888";
-      ctx.textAlign = "right";
-      ctx.fillText("▼", margin + w - 8, posY + height / 2);
-    },
-
-    mouse(event, pos, node) {
-      if (event.type === "pointerdown") {
-        openPicker(node, this, getOptions, onSelected);
-        return true;
-      }
-      return false;
-    },
-
-    computeSize(width) {
-      return [width, 26];
-    },
-
-    serializeValue(nodeId, widgetIndex) {
-      return this.value;
-    },
-  };
-
-  node.addCustomWidget(widget);
-  return widget;
-}
-
-function openPicker(node, widget, getOptions, onSelected) {
+function openPicker(node, options, current, onSelect) {
   document.querySelectorAll(".arbo-picker,.arbo-picker-overlay").forEach(el => el.remove());
-
-  const options = getOptions();
-  const current = widget.value;
-
-  // Position: get canvas transform to place picker near the widget
-  const canvas = app.canvas?.canvas || document.querySelector("canvas");
-  const rect = canvas?.getBoundingClientRect() || { left: 0, top: 0 };
-  const ds = app.canvas?.ds || {};
-  const scale = ds.scale || 1;
-  const ox = (ds.offset?.[0] || 0);
-  const oy = (ds.offset?.[1] || 0);
-  const px = rect.left + (node.pos[0] + 16 + ox) * scale;
-  const py = rect.top + (node.pos[1] + (widget.y || 60) + 30 + oy) * scale;
 
   const overlay = document.createElement("div");
   overlay.className = "arbo-picker-overlay";
 
   const picker = document.createElement("div");
   picker.className = "arbo-picker";
+
+  // Position near the node
+  const canvas = app.canvas?.canvas || document.querySelector("canvas");
+  const rect = canvas?.getBoundingClientRect() || { left: 100, top: 100 };
+  const ds = app.canvas?.ds || {};
+  const scale = ds.scale || 1;
+  const ox = ds.offset?.[0] || 0;
+  const oy = ds.offset?.[1] || 0;
+  const px = rect.left + (node.pos[0] + 16 + ox) * scale;
+  const py = rect.top + (node.pos[1] + 70 + oy) * scale;
   picker.style.left = Math.max(4, Math.min(px, window.innerWidth - 280)) + "px";
   picker.style.top = Math.max(4, Math.min(py, window.innerHeight - 310)) + "px";
-  // Match the widget width
   picker.style.width = Math.max(260, (node.size?.[0] || 300) * scale - 32) + "px";
 
   const search = document.createElement("input");
   search.className = "arbo-picker-search";
-  search.type = "text";
   search.placeholder = "Search...";
   picker.appendChild(search);
 
@@ -211,12 +132,7 @@ function openPicker(node, widget, getOptions, onSelected) {
       const item = document.createElement("div");
       item.className = `arbo-picker-item${opt === current ? " sel" : ""}`;
       item.textContent = opt;
-      item.onclick = () => {
-        widget.value = opt;
-        close();
-        node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
-        onSelected(opt);
-      };
+      item.onclick = () => { close(); onSelect(opt); };
       list.appendChild(item);
     }
   }
@@ -224,21 +140,20 @@ function openPicker(node, widget, getOptions, onSelected) {
   function close() { overlay.remove(); picker.remove(); }
   overlay.onclick = close;
   search.addEventListener("input", () => render(search.value));
-
   document.body.appendChild(overlay);
   document.body.appendChild(picker);
   render();
   setTimeout(() => search.focus(), 50);
 }
 
-// ── Prompt filtering ────────────────────────────────────────────────
+// ── Prompt data ─────────────────────────────────────────────────────
 
 async function refreshCategories(node) {
   try {
     const cats = await (await fetch(`${API}/prompts/categories`)).json();
     const w = findWidget(node, "category");
     if (w?.options) w.options.values = ["(all)", ...cats];
-  } catch { /* silent */ }
+  } catch {}
 }
 
 async function refreshPrompts(node, category = "") {
@@ -249,18 +164,17 @@ async function refreshPrompts(node, category = "") {
     const names = ["(none)"];
     for (const e of entries) { _promptPathMap[e.display] = e; names.push(e.display); }
     node._arboFilteredPrompts = names;
-  } catch { /* silent */ }
+  } catch {}
 }
 
-function getPromptInfo(displayName) { return _promptPathMap[displayName] || null; }
+function getPromptInfo(name) { return _promptPathMap[name] || null; }
 
 async function loadPromptIntoNode(node, path) {
   try {
     const data = await (await fetch(`${API}/prompts/load?path=${encodeURIComponent(path)}`)).json();
     const posW = findWidget(node, "positive"); if (posW && data.positive != null) posW.value = data.positive;
     const negW = findWidget(node, "negative"); if (negW && data.negative != null) negW.value = data.negative;
-    node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
-  } catch { /* silent */ }
+  } catch {}
 }
 
 // ── Auto-save ───────────────────────────────────────────────────────
@@ -274,7 +188,8 @@ async function doAutoSave(node) {
   const autoSaveW = findWidget(node, "auto_save");
   if (!autoSaveW?.value) return;
   if (window._psStudioOpenPath) return;
-  const name = node._arboSelectedPrompt;
+  const promptW = findWidget(node, "prompt");
+  const name = promptW?.value;
   if (!name || name === "(none)") return;
   const posW = findWidget(node, "positive");
   const negW = findWidget(node, "negative");
@@ -285,32 +200,29 @@ async function doAutoSave(node) {
   try {
     await fetch(`${API}/prompts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: info?.name || name, category: info?.category || "", positive, negative, auto_replace: true }) });
     showToast(`"${info?.name || name}" saved`);
-  } catch { /* silent */ }
+  } catch {}
 }
 
 // ── Node setup ──────────────────────────────────────────────────────
 
 function setupPromptPair(node) {
-  if (!node._arboSelectedPrompt) node._arboSelectedPrompt = "(none)";
-  if (!node._arboFilteredPrompts) node._arboFilteredPrompts = ["(none)"];
+  // ── Select button — opens picker and writes into the "prompt" STRING widget ──
+  const selectBtn = node.addWidget("button", "▼ Select Prompt", null, () => {
+    const promptW = findWidget(node, "prompt");
+    const options = node._arboFilteredPrompts || ["(none)"];
+    const current = promptW?.value || "(none)";
 
-  // ── Custom combo for prompt selection ──
-  const promptWidget = addCustomComboWidget(
-    node, "prompt_selector",
-    node._arboSelectedPrompt,
-    () => node._arboFilteredPrompts || ["(none)"],
-    async (value) => {
-      node._arboSelectedPrompt = value;
-      if (value && value !== "(none)") {
-        const info = getPromptInfo(value);
+    openPicker(node, options, current, async (selected) => {
+      if (promptW) promptW.value = selected;
+      if (selected && selected !== "(none)") {
+        const info = getPromptInfo(selected);
         if (info) await loadPromptIntoNode(node, info.path);
       } else {
         const posW = findWidget(node, "positive"); if (posW) posW.value = "";
         const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-        node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
       }
-    }
-  );
+    });
+  });
 
   // ── Buttons ──
   const addCatBtn = node.addWidget("button", "➕ New Category", null, () => {
@@ -323,7 +235,6 @@ function setupPromptPair(node) {
       await fetch(`${API}/prompts/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: v.cat }) });
       invalidateCategoryCache(); await refreshCategories(node);
       const catW = findWidget(node, "category"); if (catW) catW.value = v.cat;
-      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     });
   });
 
@@ -341,16 +252,14 @@ function setupPromptPair(node) {
       invalidateCategoryCache(); await refreshCategories(node);
       const catW = findWidget(node, "category"); if (catW && v.cat) catW.value = v.cat;
       await refreshPrompts(node, v.cat || "(all)");
-      node._arboSelectedPrompt = v.name;
-      promptWidget.value = v.name;
+      const promptW = findWidget(node, "prompt"); if (promptW) promptW.value = v.name;
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     });
   });
 
-  // ── Reorder ──
-  const order = ["category", addCatBtn.name, "prompt_selector", newPromptBtn.name, "auto_save", "positive", "negative"];
+  // ── Reorder: category, +cat, prompt, ▼select, +prompt, auto_save, pos, neg ──
+  const order = ["category", addCatBtn.name, "prompt", selectBtn.name, newPromptBtn.name, "auto_save", "positive", "negative"];
   node.widgets.sort((a, b) => {
     const ai = order.indexOf(a.name); const bi = order.indexOf(b.name);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
@@ -363,11 +272,9 @@ function setupPromptPair(node) {
     catW.callback = async function(value) {
       if (origCat) origCat.call(this, value);
       await refreshPrompts(node, value);
-      node._arboSelectedPrompt = "(none)";
-      promptWidget.value = "(none)";
+      const promptW = findWidget(node, "prompt"); if (promptW) promptW.value = "(none)";
       const posW = findWidget(node, "positive"); if (posW) posW.value = "";
       const negW = findWidget(node, "negative"); if (negW) negW.value = "";
-      node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
     };
   }
 
@@ -379,31 +286,16 @@ function setupPromptPair(node) {
     w.callback = function(value) { if (origCb) origCb.call(this, value); scheduleAutoSave(node); };
   }
 
-  // ── Persist selected prompt across save/load ──
-  const origSerialize = node.onSerialize;
-  node.onSerialize = function(o) {
-    if (origSerialize) origSerialize.call(this, o);
-    o._arboSelectedPrompt = node._arboSelectedPrompt || "(none)";
-  };
-  const origConfigure = node.onConfigure;
-  node.onConfigure = function(o) {
-    if (origConfigure) origConfigure.call(this, o);
-    if (o._arboSelectedPrompt) {
-      node._arboSelectedPrompt = o._arboSelectedPrompt;
-      promptWidget.value = o._arboSelectedPrompt;
-    }
-  };
-
   // ── Initial load ──
   setTimeout(async () => {
     await refreshCategories(node);
+    const catW = findWidget(node, "category");
     await refreshPrompts(node, catW?.value || "(all)");
-    if (node._arboSelectedPrompt && node._arboSelectedPrompt !== "(none)") {
-      promptWidget.value = node._arboSelectedPrompt;
-      const info = getPromptInfo(node._arboSelectedPrompt);
+    const promptW = findWidget(node, "prompt");
+    if (promptW?.value && promptW.value !== "(none)") {
+      const info = getPromptInfo(promptW.value);
       if (info) await loadPromptIntoNode(node, info.path);
     }
-    node.setDirtyCanvas(true, true); app.graph?.setDirtyCanvas?.(true, true);
   }, 300);
 }
 
