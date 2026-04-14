@@ -35,6 +35,36 @@ def _save_config(data: dict[str, Any]):
     _CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+async def _call_local_gguf(prompt: str, system: str, config: dict) -> str:
+    """Call a local GGUF model via llama-cpp-python."""
+    import asyncio
+    model_id = config.get("model", "")
+    if not model_id:
+        return ""
+
+    models_dir = Path(__file__).parent.parent.parent.parent / "models" / "LLM"
+    model_path = models_dir / model_id
+    if not model_path.exists():
+        return ""
+
+    def _run():
+        from llama_cpp import Llama
+        llm = Llama(model_path=str(model_path), n_ctx=2048, verbose=False)
+        result = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=1500,
+            temperature=0.7,
+        )
+        return result["choices"][0]["message"]["content"].strip()
+
+    # Run in executor to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run)
+
+
 async def _call_ollama(prompt: str, system: str, config: dict) -> str:
     """Call Ollama API."""
     import aiohttp
@@ -109,6 +139,8 @@ async def enhance_prompt(positive: str, negative: str, level: str, config: dict)
     try:
         if provider == "ollama":
             response = await _call_ollama(user_prompt, system, config)
+        elif provider == "local_gguf":
+            response = await _call_local_gguf(user_prompt, system, config)
         elif provider == "openai":
             response = await _call_openai(user_prompt, system, config)
         elif provider == "anthropic":
