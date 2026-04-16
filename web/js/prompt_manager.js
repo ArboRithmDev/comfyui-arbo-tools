@@ -196,10 +196,22 @@ async function doAutoSave(node) {
   const positive = posW?.value || "";
   const negative = negW?.value || "";
   if (!positive && !negative) return;
-  const info = getPromptInfo(name);
+
+  // Resolve category: from promptPathMap first, then from category widget
+  let info = getPromptInfo(name);
+  let saveName = info?.name || name;
+  let saveCategory = info?.category || "";
+
+  // Fallback: use the category widget value if info not found
+  if (!info) {
+    const catW = findWidget(node, "category");
+    const cat = catW?.value;
+    if (cat && cat !== "(all)") saveCategory = cat;
+  }
+
   try {
-    await fetch(`${API}/prompts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: info?.name || name, category: info?.category || "", positive, negative, auto_replace: true }) });
-    showToast(`"${info?.name || name}" saved`);
+    await fetch(`${API}/prompts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: saveName, category: saveCategory, positive, negative, auto_replace: true }) });
+    showToast(`"${saveName}" saved`);
   } catch {}
 }
 
@@ -258,8 +270,13 @@ function setupPromptPair(node) {
     });
   });
 
-  // ── Reorder: category, +cat, prompt, ▼select, +prompt, auto_save, pos, neg ──
-  const order = ["category", addCatBtn.name, "prompt", selectBtn.name, newPromptBtn.name, "auto_save", "positive", "negative"];
+  // Mark dynamic buttons as non-serializable to prevent widget index corruption
+  selectBtn.serializeValue = () => undefined;
+  addCatBtn.serializeValue = () => undefined;
+  newPromptBtn.serializeValue = () => undefined;
+
+  // ── Reorder: category, +cat, prompt, ▼select, +prompt, auto_save, concatenate, separator, pos, neg ──
+  const order = ["category", addCatBtn.name, "prompt", selectBtn.name, newPromptBtn.name, "auto_save", "concatenate", "separator", "positive", "negative"];
   node.widgets.sort((a, b) => {
     const ai = order.indexOf(a.name); const bi = order.indexOf(b.name);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);

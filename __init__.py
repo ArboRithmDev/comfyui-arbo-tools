@@ -7,6 +7,7 @@ from .nodes.optional_merge_images import OptionalMergeImages
 from .nodes.join_text_list import JoinTextList
 from .nodes.prompt_manager import PromptPair
 from .nodes.quality_switch import QualitySwitch
+from .nodes.pose_body_masks import PoseBodyMasks
 
 # Register server routes (spellcheck endpoint) when running inside ComfyUI
 try:
@@ -22,6 +23,7 @@ NODE_CLASS_MAPPINGS = {
     "ArboTools_JoinTextList": JoinTextList,
     "ArboTools_PromptPair": PromptPair,
     "ArboTools_QualitySwitch": QualitySwitch,
+    "ArboTools_PoseBodyMasks": PoseBodyMasks,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ArboTools_OptionalLoadImage": "Load Image (Optional)",
@@ -29,6 +31,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ArboTools_JoinTextList": "Join Text List",
     "ArboTools_PromptPair": "Prompt Pair",
     "ArboTools_QualitySwitch": "Quality Switch",
+    "ArboTools_PoseBodyMasks": "Pose Body Masks",
 }
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
