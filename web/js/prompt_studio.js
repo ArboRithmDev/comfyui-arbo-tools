@@ -661,8 +661,9 @@ class PromptStudio {
     const negEl = editor.querySelector("#ps-neg");
 
     // Apply current font size
-    posEl.style.fontSize = (this.fontSize || 13) + "px";
-    negEl.style.fontSize = (this.fontSize || 13) + "px";
+    const fs = (this.fontSize || 13) + "px";
+    posEl.style.setProperty("font-size", fs, "important");
+    negEl.style.setProperty("font-size", fs, "important");
 
     // Auto-save + sync to widget nodes
     for (const el of [posEl, negEl]) {
@@ -820,11 +821,11 @@ class PromptStudio {
 
   _changeFontSize(delta) {
     this.fontSize = Math.max(9, Math.min(22, (this.fontSize || 13) + delta));
-    // Target both by class and by id
+    const size = this.fontSize + "px";
+    // Force with !important to override any CSS
     const targets = this.panel?.querySelectorAll(".ps-textarea, #ps-pos, #ps-neg");
     if (targets) targets.forEach(t => {
-      t.style.fontSize = this.fontSize + "px";
-      t.style.lineHeight = (this.fontSize + 6) + "px";
+      t.style.setProperty("font-size", size, "important");
     });
   }
 
