@@ -661,8 +661,6 @@ class PromptStudio {
           <button class="ps-btn ps-btn-fontsize" id="ps-font-down" title="Decrease font size">A-</button>
           <button class="ps-btn ps-btn-fontsize" id="ps-font-up" title="Increase font size">A+</button>
           <span class="ps-separator">|</span>
-          <button class="ps-btn ps-btn-fontsize" id="ps-snippet-btn" title="Insert snippet">📋</button>
-          <span class="ps-separator">|</span>
           <select id="ps-enhance-level">
             ${Object.entries(ENHANCE_LEVELS).map(([k, v]) =>
               `<option value="${k}" ${psConfig.enhance_level === k ? "selected" : ""}>${v.label}</option>`
@@ -672,8 +670,8 @@ class PromptStudio {
         </div>
       </div>
       <div class="ps-editor-body">
-        <div class="ps-field"><div class="ps-field-label">Positive</div><textarea class="ps-textarea positive" id="ps-pos" placeholder="Positive prompt...">${data.positive || ""}</textarea></div>
-        <div class="ps-field"><div class="ps-field-label">Negative</div><textarea class="ps-textarea negative" id="ps-neg" placeholder="Negative prompt...">${data.negative || ""}</textarea></div>
+        <div class="ps-field"><div class="ps-field-label"><span>Positive</span><button class="ps-btn-snippet" id="ps-snippet-pos" title="Insert snippet">📋</button></div><textarea class="ps-textarea positive" id="ps-pos" placeholder="Positive prompt...">${data.positive || ""}</textarea></div>
+        <div class="ps-field"><div class="ps-field-label"><span>Negative</span><button class="ps-btn-snippet" id="ps-snippet-neg" title="Insert snippet">📋</button></div><textarea class="ps-textarea negative" id="ps-neg" placeholder="Negative prompt...">${data.negative || ""}</textarea></div>
       </div>
     `;
 
@@ -703,9 +701,11 @@ class PromptStudio {
     if (fontDown) fontDown.onclick = () => this._changeFontSize(-1);
     if (fontUp) fontUp.onclick = () => this._changeFontSize(1);
 
-    // Snippet button
-    const snippetBtn = editor.querySelector("#ps-snippet-btn");
-    if (snippetBtn) snippetBtn.onclick = () => this._openSnippetPicker(posEl);
+    // Snippet buttons (one per textarea)
+    const snippetPos = editor.querySelector("#ps-snippet-pos");
+    const snippetNeg = editor.querySelector("#ps-snippet-neg");
+    if (snippetPos) snippetPos.onclick = () => this._openSnippetPicker(posEl);
+    if (snippetNeg) snippetNeg.onclick = () => this._openSnippetPicker(negEl);
 
     // Enhance button
     editor.querySelector("#ps-enhance-btn").onclick = async () => {
@@ -906,7 +906,9 @@ PS_STYLE.textContent = `
   .ps-separator { color:#444;margin:0 2px; }
   .ps-editor-body { flex:1;display:flex;flex-direction:column;overflow:hidden; }
   .ps-field { flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:80px; }
-  .ps-field-label { padding:6px 16px 2px;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0; }
+  .ps-field-label { padding:6px 16px 2px;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between; }
+  .ps-btn-snippet { background:none;border:none;cursor:pointer;font-size:12px;padding:0 4px;opacity:0.5;transition:opacity .15s; }
+  .ps-btn-snippet:hover { opacity:1; }
   .ps-textarea { flex:1;margin:0 12px 6px;padding:10px;background:#2a2a3a;border:1px solid #3a3a4a;border-radius:6px;color:#e0e0e0;font-family:inherit;font-size:13px;resize:none;outline:none;line-height:1.5; }
   .ps-textarea:focus { border-color:#4ecdc4; }
   .ps-textarea.negative { border-color:#444; }
