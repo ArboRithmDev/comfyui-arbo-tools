@@ -62,6 +62,7 @@ const DEFAULT_CONFIG = {
   model_family: "sdxl",
   enhance_level: "medium",
   system_prompt_override: "",
+  font_size: 13,
 };
 
 let psConfig = { ...DEFAULT_CONFIG };
@@ -288,7 +289,7 @@ class PromptStudio {
     this.treeData = [];
     this.saveTimer = null;
     this.activeTab = "editor";
-    this.fontSize = 13;
+    this.fontSize = psConfig.font_size || 13;
   }
 
   toggle() {
@@ -298,6 +299,7 @@ class PromptStudio {
 
   async open() {
     await loadConfig();
+    this.fontSize = psConfig.font_size || 13;
 
     this.panel = document.createElement("div");
     this.panel.className = "ps-panel";
@@ -435,6 +437,15 @@ class PromptStudio {
         </div>
 
         <div class="ps-config-section">
+          <div class="ps-config-title">Editor</div>
+          <div class="ps-config-row">
+            <label>Default font size</label>
+            <input type="range" id="ps-cfg-fontsize" min="9" max="22" value="${psConfig.font_size || 13}" style="flex:1;">
+            <span id="ps-cfg-fontsize-val" style="min-width:30px;text-align:center;color:#ccc;font-size:12px;">${psConfig.font_size || 13}px</span>
+          </div>
+        </div>
+
+        <div class="ps-config-section">
           <div class="ps-config-title">System Prompt</div>
           <div class="ps-config-hint">Leave empty to use the default for the selected model family</div>
           <textarea class="ps-textarea" id="ps-cfg-sysprompt" style="height:120px" placeholder="Custom system prompt...">${psConfig.system_prompt_override || ""}</textarea>
@@ -483,6 +494,13 @@ class PromptStudio {
     providerEl.addEventListener("change", () => this._refreshModels());
     this._refreshModels();
 
+    // Font size slider
+    const fontSlider = p.querySelector("#ps-cfg-fontsize");
+    const fontVal = p.querySelector("#ps-cfg-fontsize-val");
+    if (fontSlider) {
+      fontSlider.oninput = () => { fontVal.textContent = fontSlider.value + "px"; };
+    }
+
     // Save
     p.querySelector("#ps-cfg-save").onclick = async () => {
       psConfig.provider = providerEl.value;
@@ -493,6 +511,8 @@ class PromptStudio {
       psConfig.model_family = p.querySelector("#ps-cfg-family").value;
       psConfig.enhance_level = p.querySelector("#ps-cfg-level").value;
       psConfig.system_prompt_override = p.querySelector("#ps-cfg-sysprompt").value;
+      psConfig.font_size = parseInt(fontSlider?.value || 13);
+      this.fontSize = psConfig.font_size;
       await saveConfig();
       psToast("Config saved");
     };
