@@ -734,68 +734,98 @@ class PromptStudio {
   }
 
   async _openSnippetPicker(targetTextarea) {
-    // Fetch snippets
     let snippets = [];
     try { snippets = await psApi.fetch(`${PS_API}/snippets`); } catch { return; }
-    if (!Array.isArray(snippets) || snippets.length === 0) { psToast("No snippets available"); return; }
+    if (!Array.isArray(snippets) || !snippets.length) { psToast("No snippets available"); return; }
 
-    // Group by category
     const byCategory = {};
-    for (const s of snippets) {
-      if (!byCategory[s.category]) byCategory[s.category] = [];
-      byCategory[s.category].push(s);
-    }
+    for (const s of snippets) { if (!byCategory[s.category]) byCategory[s.category] = []; byCategory[s.category].push(s); }
+    const categories = Object.keys(byCategory).sort();
 
-    // Build picker
     document.querySelectorAll(".ps-snippet-picker,.ps-snippet-overlay").forEach(el => el.remove());
-    const overlay = document.createElement("div"); overlay.className = "ps-snippet-overlay";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:10005;";
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:10005;background:rgba(0,0,0,0.4);";
 
     const picker = document.createElement("div");
-    picker.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10006;background:#1e1e2e;border:1px solid #555;border-radius:10px;padding:12px;min-width:350px;max-width:500px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:-apple-system,sans-serif;color:#e0e0e0;";
-    picker.className = "ps-snippet-picker";
+    picker.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10006;background:#1e1e2e;border:1px solid #555;border-radius:10px;padding:12px;width:420px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:-apple-system,sans-serif;color:#e0e0e0;";
 
-    let html = `<div style="font-size:14px;font-weight:600;margin-bottom:10px;color:#fff;">Insert Snippet</div>`;
-    html += `<div style="flex:1;overflow-y:auto;">`;
+    // Header: title + search + filter
+    const header = document.createElement("div");
+    header.innerHTML = `
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:#fff;">Insert Snippet</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input type="text" id="ps-snip-search" placeholder="Search..." style="flex:1;padding:6px 10px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:12px;outline:none;">
+        <select id="ps-snip-filter" style="padding:6px 8px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#ccc;font-size:11px;outline:none;">
+          <option value="">All</option>
+          ${categories.map(c => `<option value="${c}">${c}</option>`).join("")}
+        </select>
+      </div>
+    `;
+    picker.appendChild(header);
 
-    for (const [cat, items] of Object.entries(byCategory).sort()) {
-      html += `<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;padding:8px 6px 4px;">${cat}</div>`;
-      for (const s of items) {
-        html += `<div class="ps-snippet-item" data-text="${s.text.replace(/"/g, '&quot;')}" style="padding:5px 10px;font-size:12px;cursor:pointer;border-radius:4px;margin:1px 0;">
-          <div style="color:#e0e0e0;">${s.name}</div>
-          <div style="color:#666;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.text}</div>
-        </div>`;
+    const list = document.createElement("div");
+    list.style.cssText = "flex:1;overflow-y:auto;";
+    picker.appendChild(list);
+
+    const searchInput = header.querySelector("#ps-snip-search");
+    const filterSelect = header.querySelector("#ps-snip-filter");
+
+    const render = () => {
+      list.innerHTML = "";
+      const query = (searchInput.value || "").toLowerCase();
+      const catFilter = filterSelect.value;
+
+      for (const cat of categories) {
+        if (catFilter && cat !== catFilter) continue;
+        const items = byCategory[cat].filter(s => !query || s.name.toLowerCase().includes(query) || s.text.toLowerCase().includes(query));
+        if (!items.length) continue;
+
+        const catEl = document.createElement("div");
+        catEl.style.cssText = "font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;padding:8px 6px 4px;";
+        catEl.textContent = cat;
+        list.appendChild(catEl);
+
+        for (const s of items) {
+          const item = document.createElement("div");
+          item.style.cssText = "padding:5px 10px;font-size:12px;cursor:pointer;border-radius:4px;margin:1px 0;";
+          item.innerHTML = `<div style="color:#e0e0e0;">${s.name}</div><div style="color:#666;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.text}</div>`;
+          item.onmouseenter = () => item.style.background = "#2a2a3a";
+          item.onmouseleave = () => item.style.background = "";
+          item.onclick = () => {
+            const pos = targetTextarea.selectionStart || targetTextarea.value.length;
+            const before = targetTextarea.value.substring(0, pos);
+            const after = targetTextarea.value.substring(pos);
+            const sep = before && !before.endsWith("\n") && !before.endsWith(", ") ? ", " : "";
+            targetTextarea.value = before + sep + s.text + after;
+            targetTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+            close();
+            psToast(`Inserted "${s.name}"`);
+          };
+          list.appendChild(item);
+        }
       }
-    }
-    html += `</div>`;
-    picker.innerHTML = html;
+      if (!list.children.length) list.innerHTML = `<div style="padding:20px;text-align:center;color:#555;font-size:12px;">No snippets found</div>`;
+    };
 
-    // Click to insert
-    picker.querySelectorAll(".ps-snippet-item").forEach(item => {
-      item.onmouseenter = () => item.style.background = "#2a2a3a";
-      item.onmouseleave = () => item.style.background = "";
-      item.onclick = () => {
-        const text = item.dataset.text;
-        const pos = targetTextarea.selectionStart || targetTextarea.value.length;
-        const before = targetTextarea.value.substring(0, pos);
-        const after = targetTextarea.value.substring(pos);
-        const sep = before && !before.endsWith("\n") && !before.endsWith(", ") ? ", " : "";
-        targetTextarea.value = before + sep + text + after;
-        targetTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-        overlay.remove(); picker.remove();
-        psToast(`Inserted "${item.querySelector("div").textContent}"`);
-      };
-    });
+    const close = () => { overlay.remove(); picker.remove(); };
+    searchInput.addEventListener("input", render);
+    filterSelect.addEventListener("change", render);
+    overlay.onclick = close;
 
-    overlay.onclick = () => { overlay.remove(); picker.remove(); };
     document.body.appendChild(overlay);
     document.body.appendChild(picker);
+    render();
+    setTimeout(() => searchInput.focus(), 50);
   }
 
   _changeFontSize(delta) {
     this.fontSize = Math.max(9, Math.min(22, (this.fontSize || 13) + delta));
-    const textareas = this.panel?.querySelectorAll(".ps-textarea");
-    if (textareas) textareas.forEach(t => t.style.fontSize = this.fontSize + "px");
+    // Target both by class and by id
+    const targets = this.panel?.querySelectorAll(".ps-textarea, #ps-pos, #ps-neg");
+    if (targets) targets.forEach(t => {
+      t.style.fontSize = this.fontSize + "px";
+      t.style.lineHeight = (this.fontSize + 6) + "px";
+    });
   }
 
   _showEmpty() {
