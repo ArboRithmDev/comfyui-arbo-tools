@@ -641,6 +641,8 @@ class PromptStudio {
           <button class="ps-btn ps-btn-fontsize" id="ps-font-down" title="Decrease font size">A-</button>
           <button class="ps-btn ps-btn-fontsize" id="ps-font-up" title="Increase font size">A+</button>
           <span class="ps-separator">|</span>
+          <button class="ps-btn ps-btn-fontsize" id="ps-snippet-btn" title="Insert snippet">📋</button>
+          <span class="ps-separator">|</span>
           <select id="ps-enhance-level">
             ${Object.entries(ENHANCE_LEVELS).map(([k, v]) =>
               `<option value="${k}" ${psConfig.enhance_level === k ? "selected" : ""}>${v.label}</option>`
@@ -675,8 +677,14 @@ class PromptStudio {
     }
 
     // Font size buttons
-    editor.querySelector("#ps-font-down").onclick = () => this._changeFontSize(-1);
-    editor.querySelector("#ps-font-up").onclick = () => this._changeFontSize(1);
+    const fontDown = editor.querySelector("#ps-font-down");
+    const fontUp = editor.querySelector("#ps-font-up");
+    if (fontDown) fontDown.onclick = () => this._changeFontSize(-1);
+    if (fontUp) fontUp.onclick = () => this._changeFontSize(1);
+
+    // Snippet button
+    const snippetBtn = editor.querySelector("#ps-snippet-btn");
+    if (snippetBtn) snippetBtn.onclick = () => this._openSnippetPicker(posEl);
 
     // Enhance button
     editor.querySelector("#ps-enhance-btn").onclick = async () => {
@@ -723,6 +731,65 @@ class PromptStudio {
         node.setDirtyCanvas?.(true);
       }
     }
+  }
+
+  async _openSnippetPicker(targetTextarea) {
+    // Fetch snippets
+    let snippets = [];
+    try { snippets = await psApi.fetch(`${PS_API}/snippets`); } catch { return; }
+    if (!Array.isArray(snippets) || snippets.length === 0) { psToast("No snippets available"); return; }
+
+    // Group by category
+    const byCategory = {};
+    for (const s of snippets) {
+      if (!byCategory[s.category]) byCategory[s.category] = [];
+      byCategory[s.category].push(s);
+    }
+
+    // Build picker
+    document.querySelectorAll(".ps-snippet-picker,.ps-snippet-overlay").forEach(el => el.remove());
+    const overlay = document.createElement("div"); overlay.className = "ps-snippet-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:10005;";
+
+    const picker = document.createElement("div");
+    picker.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10006;background:#1e1e2e;border:1px solid #555;border-radius:10px;padding:12px;min-width:350px;max-width:500px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:-apple-system,sans-serif;color:#e0e0e0;";
+    picker.className = "ps-snippet-picker";
+
+    let html = `<div style="font-size:14px;font-weight:600;margin-bottom:10px;color:#fff;">Insert Snippet</div>`;
+    html += `<div style="flex:1;overflow-y:auto;">`;
+
+    for (const [cat, items] of Object.entries(byCategory).sort()) {
+      html += `<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;padding:8px 6px 4px;">${cat}</div>`;
+      for (const s of items) {
+        html += `<div class="ps-snippet-item" data-text="${s.text.replace(/"/g, '&quot;')}" style="padding:5px 10px;font-size:12px;cursor:pointer;border-radius:4px;margin:1px 0;">
+          <div style="color:#e0e0e0;">${s.name}</div>
+          <div style="color:#666;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.text}</div>
+        </div>`;
+      }
+    }
+    html += `</div>`;
+    picker.innerHTML = html;
+
+    // Click to insert
+    picker.querySelectorAll(".ps-snippet-item").forEach(item => {
+      item.onmouseenter = () => item.style.background = "#2a2a3a";
+      item.onmouseleave = () => item.style.background = "";
+      item.onclick = () => {
+        const text = item.dataset.text;
+        const pos = targetTextarea.selectionStart || targetTextarea.value.length;
+        const before = targetTextarea.value.substring(0, pos);
+        const after = targetTextarea.value.substring(pos);
+        const sep = before && !before.endsWith("\n") && !before.endsWith(", ") ? ", " : "";
+        targetTextarea.value = before + sep + text + after;
+        targetTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+        overlay.remove(); picker.remove();
+        psToast(`Inserted "${item.querySelector("div").textContent}"`);
+      };
+    });
+
+    overlay.onclick = () => { overlay.remove(); picker.remove(); };
+    document.body.appendChild(overlay);
+    document.body.appendChild(picker);
   }
 
   _changeFontSize(delta) {

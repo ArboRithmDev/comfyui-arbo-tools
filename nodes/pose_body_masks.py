@@ -122,19 +122,29 @@ def _draw_ellipse(draw, cx, cy, rx, ry):
 
 
 def _kp_xy(kps, idx):
-    """Get (x, y) pixel tuple for a keypoint, or None."""
+    """Get (x, y) pixel tuple for a keypoint. Assumes coords already in pixels."""
     if idx in kps:
         return (kps[idx][0], kps[idx][1])
     return None
 
 
-def _generate_masks(kps, canvas_w, canvas_h, padding_px):
-    """Generate all body zone masks from parsed keypoints (pixel coords)."""
+def _generate_masks(kps_norm, canvas_w, canvas_h, padding_px):
+    """Generate all body zone masks from normalized keypoints (0-1 range).
+    Coordinates are converted to pixels internally."""
 
     pad = padding_px
+    cw, ch = canvas_w, canvas_h
 
-    # Estimate body scale from shoulder width
-    shoulder_w = _dist(kps, R_SHOULDER, L_SHOULDER)
+    # Convert all keypoints to pixel coords once
+    kps = {}
+    for idx, (x, y, c) in kps_norm.items():
+        kps[idx] = (x * cw, y * ch, c)
+
+    # Estimate body scale from shoulder width (in pixels)
+    shoulder_w = 0
+    if R_SHOULDER in kps and L_SHOULDER in kps:
+        shoulder_w = ((kps[R_SHOULDER][0] - kps[L_SHOULDER][0]) ** 2 +
+                      (kps[R_SHOULDER][1] - kps[L_SHOULDER][1]) ** 2) ** 0.5
     if shoulder_w == 0:
         shoulder_w = canvas_w * 0.25  # fallback
     limb_w = shoulder_w * 0.4  # limb mask width
@@ -271,6 +281,67 @@ def _pil_to_mask(pil_img, feather=0):
     return torch.from_numpy(arr).unsqueeze(0)
 
 
+def _generate_preview_grid(masks, names, canvas_w, canvas_h):
+    """Generate a grid image showing all masks with labels.
+
+    Layout: 6 columns, as many rows as needed.
+    Each cell shows the mask in green on dark background with a label.
+    """
+    from PIL import ImageFont
+
+    cols = 6
+    rows = (len(names) + cols - 1) // cols
+    cell_w = max(canvas_w // 4, 160)  # thumbnail size
+    cell_h = max(canvas_h // 4, 200)
+    label_h = 24
+    margin = 4
+
+    grid_w = cols * (cell_w + margin) + margin
+    grid_h = rows * (cell_h + label_h + margin) + margin
+    grid = Image.new("RGB", (grid_w, grid_h), (30, 30, 30))
+    grid_draw = ImageDraw.Draw(grid)
+
+    # Try to load a font, fallback to default
+    try:
+        font = ImageFont.truetype("FreeMono.ttf", 14)
+    except Exception:
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 13)
+        except Exception:
+            font = ImageFont.load_default()
+
+    for i, name in enumerate(names):
+        col = i % cols
+        row = i // cols
+        x = margin + col * (cell_w + margin)
+        y = margin + row * (cell_h + label_h + margin)
+
+        # Resize mask to thumbnail
+        mask_img = masks[name].resize((cell_w, cell_h), Image.Resampling.NEAREST)
+        mask_arr = np.array(mask_img)
+
+        # Colorize: mask in green channel on dark background
+        rgb = np.zeros((cell_h, cell_w, 3), dtype=np.uint8)
+        rgb[:, :, 0] = (mask_arr * 0.2).astype(np.uint8)  # slight red
+        rgb[:, :, 1] = mask_arr  # green = mask
+        rgb[:, :, 2] = (mask_arr * 0.1).astype(np.uint8)  # slight blue
+        cell_img = Image.fromarray(rgb)
+
+        # Paste cell
+        grid.paste(cell_img, (x, y))
+
+        # Draw border
+        grid_draw.rectangle([x - 1, y - 1, x + cell_w, y + cell_h], outline=(80, 80, 80))
+
+        # Draw label below
+        label = name.replace("_", " ").title()
+        grid_draw.text((x + 4, y + cell_h + 2), label, fill=(200, 200, 200), font=font)
+
+    # Convert to ComfyUI IMAGE tensor [1, H, W, 3]
+    arr = np.array(grid).astype(np.float32) / 255.0
+    return torch.from_numpy(arr).unsqueeze(0)
+
+
 class PoseBodyMasks:
     """Generate body-zone masks from OpenPose keypoints.
 
@@ -295,7 +366,7 @@ class PoseBodyMasks:
 
     CATEGORY = "ArboTools/Pose"
 
-    RETURN_TYPES = ("MASK",) * 18
+    RETURN_TYPES = ("MASK",) * 18 + ("IMAGE",)
     RETURN_NAMES = (
         "head", "neck", "torso",
         "right_arm_upper", "right_arm_lower",
@@ -306,6 +377,7 @@ class PoseBodyMasks:
         "left_leg_upper", "left_leg_lower",
         "legs", "feet",
         "upper_body", "lower_body", "full_body",
+        "preview_grid",
     )
     FUNCTION = "generate_masks"
 
@@ -343,7 +415,8 @@ class PoseBodyMasks:
         if not people or person_index >= len(people):
             print(f"[PoseBodyMasks] WARNING: No person detected — returning empty masks")
             empty = torch.zeros((1, canvas_h, canvas_w), dtype=torch.float32)
-            return tuple([empty] * 18)
+            empty_img = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+            return tuple([empty] * 18) + (empty_img,)
 
         person = people[person_index]
 
@@ -378,4 +451,8 @@ class PoseBodyMasks:
             "upper_body", "lower_body", "full_body",
         ]
 
-        return tuple(_pil_to_mask(masks[name], feather) for name in output_order)
+        # Generate preview grid (before feather so labels match raw masks)
+        preview_grid = _generate_preview_grid(masks, output_order, canvas_w, canvas_h)
+
+        mask_outputs = tuple(_pil_to_mask(masks[name], feather) for name in output_order)
+        return mask_outputs + (preview_grid,)
