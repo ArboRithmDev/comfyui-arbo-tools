@@ -18,6 +18,7 @@ try:
     from .arbo_server import prompt_storage  # noqa: F401 — registers prompt API routes
     from .arbo_server import prompt_enhance  # noqa: F401 — registers studio/enhance routes
     from .arbo_server import snippets  # noqa: F401 — registers snippet routes
+    from .arbo_server import styles  # noqa: F401 — registers style preset routes
 except Exception:
     pass
 

@@ -308,6 +308,7 @@ class PromptStudio {
         <h2>Prompt Studio</h2>
         <div class="ps-tabs">
           <button class="ps-tab active" data-tab="editor">Editor</button>
+          <button class="ps-tab" data-tab="styles">Styles</button>
           <button class="ps-tab" data-tab="config">Config</button>
         </div>
         <button class="ps-close">✕</button>
@@ -327,6 +328,17 @@ class PromptStudio {
           <div class="ps-tab-content active" data-tab="editor">
             <div class="ps-editor">
               <div class="ps-editor-empty">Select a prompt to edit</div>
+            </div>
+          </div>
+          <div class="ps-tab-content" data-tab="styles">
+            <div class="ps-styles-panel">
+              <div class="ps-styles-toolbar">
+                <input type="text" id="ps-styles-search" placeholder="Search styles..." class="ps-styles-search">
+                <select id="ps-styles-filter" class="ps-styles-filter">
+                  <option value="">All categories</option>
+                </select>
+              </div>
+              <div id="ps-styles-list" class="ps-styles-list"></div>
             </div>
           </div>
           <div class="ps-tab-content" data-tab="config">
@@ -369,6 +381,7 @@ class PromptStudio {
 
     await this.refreshTree();
     this._bindConfig();
+    this._bindStyles();
   }
 
   // ── Config ──────────────────────────────────────────────────────
@@ -754,6 +767,81 @@ class PromptStudio {
     }
   }
 
+  // ── Styles ─────────────────────────────────────────────────────
+
+  async _bindStyles() {
+    this._stylesData = [];
+    try { this._stylesData = await psApi.fetch(`${PS_API}/styles`); } catch {}
+
+    // Populate category filter
+    const cats = [...new Set(this._stylesData.map(s => s.category).filter(Boolean))].sort();
+    const filterEl = this.panel?.querySelector("#ps-styles-filter");
+    if (filterEl) {
+      filterEl.innerHTML = `<option value="">All categories</option>${cats.map(c => `<option value="${c}">${c}</option>`).join("")}`;
+    }
+
+    const searchEl = this.panel?.querySelector("#ps-styles-search");
+    if (searchEl) searchEl.addEventListener("input", () => this._renderStyles());
+    if (filterEl) filterEl.addEventListener("change", () => this._renderStyles());
+
+    this._renderStyles();
+  }
+
+  _renderStyles() {
+    const list = this.panel?.querySelector("#ps-styles-list");
+    if (!list) return;
+
+    const query = (this.panel.querySelector("#ps-styles-search")?.value || "").toLowerCase();
+    const catFilter = this.panel.querySelector("#ps-styles-filter")?.value || "";
+
+    list.innerHTML = "";
+    for (const s of this._stylesData) {
+      if (catFilter && s.category !== catFilter) continue;
+      if (query && !s.name.toLowerCase().includes(query) && !(s.positive_tags || "").toLowerCase().includes(query)) continue;
+
+      const card = document.createElement("div");
+      card.className = "ps-style-card";
+      card.innerHTML = `
+        <div class="ps-style-card-cat">${s.category || ""}</div>
+        <div class="ps-style-card-name">${s.name}</div>
+        <div class="ps-style-card-tags">${s.positive_tags || ""}</div>
+        <div class="ps-style-card-actions">
+          <button class="ps-style-card-btn apply" data-action="apply">Apply to prompt</button>
+        </div>
+      `;
+
+      card.querySelector('[data-action="apply"]').onclick = (e) => {
+        e.stopPropagation();
+        this._applyStyle(s);
+      };
+
+      list.appendChild(card);
+    }
+
+    if (!list.children.length) {
+      list.innerHTML = `<div style="padding:20px;text-align:center;color:#555;font-size:12px;width:100%;">No styles found</div>`;
+    }
+  }
+
+  _applyStyle(style) {
+    const posEl = this.panel?.querySelector("#ps-pos");
+    const negEl = this.panel?.querySelector("#ps-neg");
+
+    if (posEl && style.positive_tags) {
+      const current = posEl.value;
+      const sep = current && !current.endsWith("\n") && !current.endsWith(", ") ? ", " : "";
+      posEl.value = current + sep + style.positive_tags;
+      posEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (negEl && style.negative_tags) {
+      const current = negEl.value;
+      const sep = current && !current.endsWith("\n") && !current.endsWith(", ") ? ", " : "";
+      negEl.value = current + sep + style.negative_tags;
+      negEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    psToast(`Style "${style.name}" applied`);
+  }
+
   async _openSnippetPicker(targetTextarea) {
     let snippets = [];
     try { snippets = await psApi.fetch(`${PS_API}/snippets`); } catch { return; }
@@ -908,6 +996,25 @@ PS_STYLE.textContent = `
   .ps-field { flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:80px; }
   .ps-field-label { padding:6px 16px 2px;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between; }
   .ps-btn-snippet { background:none;border:none;cursor:pointer;font-size:12px;padding:0 4px;opacity:0.5;transition:opacity .15s; }
+
+  /* Styles panel */
+  .ps-styles-panel { flex:1;display:flex;flex-direction:column;overflow:hidden; }
+  .ps-styles-toolbar { display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid #2a2a3a; }
+  .ps-styles-search { flex:1;padding:6px 10px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#e0e0e0;font-size:12px;outline:none; }
+  .ps-styles-search:focus { border-color:#4ecdc4; }
+  .ps-styles-filter { padding:6px 8px;background:#2a2a3a;border:1px solid #444;border-radius:6px;color:#ccc;font-size:11px;outline:none; }
+  .ps-styles-list { flex:1;overflow-y:auto;padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start; }
+  .ps-style-card { width:calc(50% - 4px);background:#252536;border:1px solid #333;border-radius:8px;padding:10px;cursor:pointer;transition:all .15s; }
+  .ps-style-card:hover { border-color:#4ecdc4;background:#2a2a3a; }
+  .ps-style-card.active { border-color:#4ecdc4;background:#2a2a3a;box-shadow:0 0 8px rgba(78,205,196,0.2); }
+  .ps-style-card-name { font-size:12px;font-weight:600;color:#fff;margin-bottom:4px; }
+  .ps-style-card-cat { font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px; }
+  .ps-style-card-tags { font-size:10px;color:#666;line-height:1.4;max-height:40px;overflow:hidden; }
+  .ps-style-card-actions { display:flex;gap:4px;margin-top:6px; }
+  .ps-style-card-btn { background:#333;border:none;color:#aaa;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer; }
+  .ps-style-card-btn:hover { background:#444;color:#4ecdc4; }
+  .ps-style-card-btn.apply { background:#4ecdc4;color:#1e1e2e; }
+  .ps-style-card-btn.apply:hover { background:#3dbdb5; }
   .ps-btn-snippet:hover { opacity:1; }
   .ps-textarea { flex:1;margin:0 12px 6px;padding:10px;background:#2a2a3a;border:1px solid #3a3a4a;border-radius:6px;color:#e0e0e0;font-family:inherit;font-size:13px;resize:none;outline:none;line-height:1.5; }
   .ps-textarea:focus { border-color:#4ecdc4; }
